@@ -41,6 +41,19 @@ def test_cathay_login_announcements_are_acknowledged_before_submit():
     assert state == {"remaining": 0, "clicks": 2}
 
 
+def test_cathay_advances_announcement_before_acknowledging():
+    state = {"step": 0, "clicks": []}
+    def button(text):
+        expected = "下一則" if state["step"] == 0 else "我知道了"
+        return SimpleNamespace(count=lambda: int(text == expected), is_visible=lambda: True,
+            click=lambda **kwargs: (state["clicks"].append(text), state.update(step=state["step"] + 1)))
+    notice = SimpleNamespace(count=lambda: int(state["step"] < 2), get_by_text=lambda text, **kw: button(text))
+    frame = SimpleNamespace(url="https://www.cathaybk.com.tw/MyBank/Home", locator=lambda selector: notice,
+                            wait_for_timeout=lambda ms: None)
+    dismiss_login_notice(SimpleNamespace(url=frame.url), frame, "cathay", lambda url: True)
+    assert state["clicks"] == ["下一則", "我知道了"]
+
+
 def test_bank_password_override_does_not_change_default_or_ctbc(monkeypatch):
     default_credentials(monkeypatch)
     monkeypatch.setenv("ESUN_BANK_PASSWORD", "esun-only")

@@ -134,7 +134,11 @@ def dismiss_login_notice(page, frame, bank, is_official, *, wait_for_notice=Fals
                 return
             acknowledge = notice.get_by_text("我知道了", exact=True)
             if acknowledge.count() != 1 or not acknowledge.is_visible():
-                raise BankQueryError("國泰登入前公告沒有唯一的確認按鈕；未送出登入", "login_form_changed")
+                # Multi-page announcements expose the acknowledgement only
+                # after the final page. Stay inside the verified notice.
+                acknowledge = notice.get_by_text("下一則", exact=True)
+                if acknowledge.count() != 1 or not acknowledge.is_visible():
+                    raise BankQueryError("國泰登入前公告沒有唯一的下一則或確認按鈕；未送出登入", "login_form_changed")
             acknowledge.click(timeout=5000)
             frame.wait_for_timeout(250)
         if notice.count():

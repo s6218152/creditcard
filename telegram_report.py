@@ -104,6 +104,11 @@ def main():
             if path.exists():
                 bundle.writestr(path.name, redact(path.read_text()))
     send_document(token, chat_id, "creditcard-report.zip", archive.getvalue())
+    # Status and counts only: keep financial amounts and errors in Telegram.
+    safe_status = [{"bank": row.get("bank"), "status": row.get("status"),
+                    "error_code": row.get("error_code"), "diagnostics": row.get("diagnostics", [])}
+                   for row in report.get("balances", [])]
+    print("Telegram 訊息與附件傳送完成；銀行狀態：" + json.dumps(safe_status, ensure_ascii=False))
     return 0 if succeeded else 1
 
 

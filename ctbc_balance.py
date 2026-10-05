@@ -16,6 +16,7 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
 from chrome_session import system_chrome_context
+from bank_diagnostics import diagnostic_chrome_context
 
 
 # Use the current standalone Internet Banking login, not the legacy header form.
@@ -117,7 +118,7 @@ def login_from_environment(page) -> bool:
 def query_balance(balance_selector: str | None = None, *, manual_login: bool = False) -> Decimal:
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
     with sync_playwright() as playwright:
-        with system_chrome_context(playwright) as context:
+        with diagnostic_chrome_context(playwright, "ctbc", is_ctbc_url, system_chrome_context) as context:
             page = context.new_page()
             page.goto(LOGIN_URL, wait_until="load", timeout=30_000)
             read_bank_page(page)

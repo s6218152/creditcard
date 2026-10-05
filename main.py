@@ -224,7 +224,12 @@ def print_statement_summaries(summaries: list, balances: list) -> set:
             print(f"檔案: {meta.get('filename')} - 解析錯誤: {meta.get('error_message')}")
             continue
         print(f"銀行: {bank_name}")
-        print(f"本期應繳總金額: NT$ {parsed_result['total_amount']:,}")
+        if parsed_result.get("total_amount_found", True):
+            print(f"本期應繳總金額: NT$ {parsed_result['total_amount']:,}")
+        else:
+            print("本期應繳總金額: 未辨識（需人工確認）")
+        if bank_name == "未知銀行":
+            print(f"檔案: {meta.get('filename', '未知')}（銀行未辨識）")
         print(f"繳款截止日: {parsed_result.get('due_date') or '未知'}")
         balance = by_bank.get(bank_name.removesuffix("銀行"))
         if balance:

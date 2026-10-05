@@ -61,10 +61,15 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
             break
         except Exception as error:
             print(f"[{name}餘額] 查詢失敗：{error}")
+            diagnostics = getattr(error, "diagnostics", [])
+            if diagnostics:
+                import json
+                print(f"[{name}頁面診斷] {json.dumps(diagnostics, ensure_ascii=False)}")
             succeeded = False
             if on_result:
                 on_result({"bank": key, "bank_name": name, "status": "error", "balance": None,
                            "error_message": str(error), "error_code": getattr(error, "code", "query_failed"),
+                           "diagnostics": diagnostics,
                            "queried_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     if results and show_summary and show_results:
         print("\n=== 本次餘額查詢結果 ===")

@@ -274,3 +274,12 @@ def test_each_bank_balance_is_placed_after_its_own_due_date(capsys):
     output = capsys.readouterr().out
     assert '繳款截止日: 115/10/10\n臺幣存款餘額: NT$ 1,234.00' in output
     assert '繳款截止日: 115/10/20\n存款餘額: 待完成網銀驗證' in output
+
+
+def test_unrecognized_payment_amount_is_not_reported_as_zero(capsys):
+    from main import print_statement_summaries
+    print_statement_summaries([("國泰世華", {"metadata": {"status": "success"},
+        "total_amount": 0, "total_amount_found": False, "due_date": ""})], [])
+    output = capsys.readouterr().out
+    assert "本期應繳總金額: 未辨識（需人工確認）" in output
+    assert "NT$ 0" not in output

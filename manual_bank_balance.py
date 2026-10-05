@@ -9,6 +9,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 from bank_registry import AUTO_BANKS
 from chrome_session import system_chrome_context
+from bank_diagnostics import diagnostic_chrome_context, has_verification_challenge
 from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog
 from bank_captcha import CAPTCHA_IMAGES
 from ctbc_balance import parse_balance_text
@@ -586,7 +587,7 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
     name, url, _ = AUTO_BANKS[bank]
     is_official = lambda location: is_bank_url(location, bank)
     with sync_playwright() as playwright:
-        with system_chrome_context(playwright) as context:
+        with diagnostic_chrome_context(playwright, bank, is_official, system_chrome_context) as context:
             page = context.new_page()
             alerts = []
             def on_dialog(dialog):
@@ -702,7 +703,7 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
                             click_balance_navigation(page, bank, visited)
                 page.wait_for_timeout(500)
             if not logged_in:
-                code = "verification_required" if LOGIN_FORMS[bank].captcha else "login_unconfirmed"
+                code = "verification_required" if has_verification_challenge(page, is_official) else "login_unconfirmed"
                 raise BankQueryError("尚未完成登入或銀行驗證，未取得餘額；本次不會重送帳密", code)
             raise BankQueryError(f"已登入但未辨識到唯一存款餘額；請設定該銀行 balance_selector（{last_error}）", "balance_unavailable")
 
@@ -713,4 +714,6 @@ def query_balance(bank, balance_selector=None, *, verification_timeout=120):
     except PlaywrightError as error:
         # Playwright action logs can include the argument passed to fill().
         # Keep credentials out of terminal output and persisted reports.
-        raise BankQueryError("網銀頁面操作逾時或已關閉；未取得餘額，不會重送登入", "browser_action_failed") from error
+        sanitized = BankQueryError("網銀頁面操作逾時或已關閉；未取得餘額，不會重送登入", "browser_action_failed")
+        sanitized.diagnostics = getattr(error, "diagnostics", [])
+        raise sanitized from error

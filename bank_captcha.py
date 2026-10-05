@@ -246,7 +246,18 @@ def _image_bytes(images, spec):
         else:
             item = images.nth(i)
             if not spec.background:
-                item.evaluate("e => { if (!e.complete || !e.naturalWidth) throw Error('image not ready'); }")
+                item.evaluate("""async e => {
+                    let timer;
+                    try {
+                        await Promise.race([
+                            e.decode(),
+                            new Promise((_, reject) => {
+                                timer = setTimeout(() => reject(Error('image load timeout')), 5000);
+                            })
+                        ]);
+                        if (!e.complete || !e.naturalWidth) throw Error('image not ready');
+                    } finally { clearTimeout(timer); }
+                }""")
             pictures.append(item.screenshot(timeout=5000))
     if spec.tiles == 1:
         return sources, pictures[0]
@@ -272,8 +283,15 @@ def _image_bytes(images, spec):
 
 def _fill_once(page, frame, spec, field, is_official):
     images = frame.locator(spec.image + ":visible")
-    if images.count() != spec.tiles or (spec.check_maxlength and field.get_attribute("maxlength") != str(spec.length)):
-        raise CaptchaError("驗證碼圖片數量或欄位長度不符", "captcha_form_unavailable")
+    image_count = images.count()
+    if image_count == 0:
+        # Visibility of the input does not imply that its SPA image has arrived.
+        images.first.wait_for(state="visible", timeout=5000)
+        image_count = images.count()
+    maxlength = field.get_attribute("maxlength")
+    if image_count != spec.tiles or (spec.check_maxlength and maxlength != str(spec.length)):
+        raise CaptchaError(f"驗證碼表單不符：圖片 {image_count}/{spec.tiles}，"
+                           f"maxlength {maxlength!r}/{spec.length}（未送出登入）", "captcha_form_unavailable")
     if field.input_value():
         return False
     sources, image = _image_bytes(images, spec)
