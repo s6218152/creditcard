@@ -12,6 +12,45 @@ from mail_fetcher import (
 )
 from io import BytesIO
 from pypdf import PdfWriter
+from pathlib import Path
+import yaml
+
+
+@pytest.mark.parametrize("subject,sender,allowed", [
+    ("國泰世華銀行信用卡2026年8月電子帳單", "國泰世華銀行 <notice@example.com>", True),
+    ("國泰世華銀行信用卡2026年9月電子帳單", "notice@example.com", False),
+    ("Re: 國泰世華銀行信用卡2026年8月電子帳單", "notice@example.com", False),
+    ("國泰世華銀行貸款通知", "notice@example.com", False),
+    ("本期電子對帳單", "國泰世華銀行 <notice@example.com>", False),
+    ("電子對帳單", "notice@bill.cathaybk.com.tw", False),
+    ("彰化銀行2026年9月份信用卡帳單", "notice@example.com", True),
+])
+def test_cathay_subject_requires_exact_configured_title(subject, sender, allowed):
+    config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
+    assert matches_email_filter(subject, sender, config["mail"]["local_filters"]) is allowed
+
+
+def test_rejected_cathay_message_never_fetches_body(monkeypatch):
+    config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
+    message = EmailMessage()
+    message["Subject"] = "國泰世華銀行信用卡2026年9月電子帳單"
+    message["From"] = "notice@cathaybk.com.tw"
+    calls = []
+    class Mail:
+        def uid(self, command, *args):
+            calls.append((command, args))
+            if command == "search":
+                return "OK", [b"123"]
+            assert args[-1] == "(RFC822.HEADER)", "Excluded message body must not be fetched"
+            return "OK", [(b"1 (UID 123)", message.as_bytes())]
+    fetcher = MailFetcher.__new__(MailFetcher)
+    fetcher.config, fetcher.history, fetcher.mail = config, {}, Mail()
+    monkeypatch.setattr(fetcher, "connect", lambda: None)
+    monkeypatch.setattr(fetcher, "disconnect", lambda: None)
+    monkeypatch.setattr(fetcher, "save_history", lambda: None)
+    assert fetcher.fetch_statements() == 0
+    assert fetcher.history["123"]["excluded"] is True
+    assert len(calls) == 2
 
 
 def test_get_search_cutoff_date_latest_month():

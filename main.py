@@ -297,7 +297,7 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     excluded_filenames = {
         Path(attachment).name
         for record in fetcher.history.values()
-        if isinstance(record, dict) and is_excluded_email(record.get("subject", ""), config["mail"]["local_filters"])
+        if isinstance(record, dict) and is_excluded_email(record.get("subject", ""), config["mail"]["local_filters"], record.get("sender", ""))
         for attachment in record.get("attachments", [])
     }
     mail_fetch_succeeded = True

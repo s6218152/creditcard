@@ -7,6 +7,11 @@ mail:
   
   # 本地過濾器：主旨或寄件者中必須包含以下任一關鍵字才會被下載與解析
   local_filters:
+    bank_subject_rules:
+      國泰世華:
+        sender_domains: ["cathaybk.com.tw"]
+        exact_subjects:
+          - "國泰世華銀行信用卡2026年8月電子帳單"
     exclude_subjects:
       - "*星展銀行(台灣)電子對帳單 - *"
       - "*【國泰世華銀行】 開放銀行服務訊息通知*"

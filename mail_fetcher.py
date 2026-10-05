@@ -14,7 +14,7 @@ import tempfile
 import hashlib
 import io
 import pypdf
-from email.utils import parsedate_to_datetime
+from email.utils import parsedate_to_datetime, parseaddr
 from statement_filter import latest_statement_flags
 from config_validation import validate_config
 from storage_utils import private_directory, private_file
@@ -57,7 +57,7 @@ def matches_email_filter(subject, sender, local_filters):
     subject = subject or ""
     sender = sender or ""
 
-    if is_excluded_email(subject, local_filters):
+    if is_excluded_email(subject, local_filters, sender):
         return False
 
     def matches_any(text, patterns):
@@ -80,7 +80,16 @@ def matches_email_filter(subject, sender, local_filters):
     return False
 
 
-def is_excluded_email(subject, local_filters):
+def is_excluded_email(subject, local_filters, sender=""):
+    original_subject = subject or ""
+    sender_domain = parseaddr(sender or "")[1].rpartition("@")[2].casefold()
+    for bank, rule in local_filters.get("bank_subject_rules", {}).items():
+        domains = rule.get("sender_domains", [])
+        belongs_to_bank = (bank in original_subject or bank in (sender or "") or
+                           any(sender_domain == domain or sender_domain.endswith("." + domain)
+                               for domain in domains))
+        if belongs_to_bank and original_subject not in rule.get("exact_subjects", []):
+            return True
     subject = (subject or "").casefold()
     for pattern in local_filters.get("exclude_subjects", []):
         pattern = pattern.casefold()
@@ -285,7 +294,7 @@ class MailFetcher:
                     sender = decode_mime_header(msg.get('From', ''))
                     date_str = msg.get('Date', '')
 
-                    if is_excluded_email(subject, local_filters):
+                    if is_excluded_email(subject, local_filters, sender):
                         self.history[uid_str] = {
                             "subject": subject,
                             "sender": sender,
