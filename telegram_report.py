@@ -14,6 +14,26 @@ import yaml
 from dotenv import dotenv_values
 
 
+def summary_text(output, balances):
+    prefixes = ("銀行:", "本期應繳總金額:", "繳款截止日:", "臺幣存款餘額:",
+                "臺幣活期存款餘額:", "存款餘額:", "提醒：", "檔案:",
+                "注意：本次部分下載流程失敗", "雲端執行逾時")
+    lines = []
+    standalone = tuple(row.get("bank_name", "") + label for row in balances
+                       for label in ("臺幣存款餘額:", "臺幣活期存款餘額:", "存款餘額:"))
+    for line in output.splitlines():
+        if line.startswith(prefixes + standalone):
+            if line.startswith("銀行:") and lines:
+                lines.append("--------------------")
+            lines.append(line)
+    text = "\n".join(lines)
+    for row in balances:
+        name = row.get("bank_name", "未知銀行")
+        if row.get("status") != "success" and f"銀行: {name}\n" not in text + "\n":
+            lines.append(f"{name}：存款餘額未取得（{row.get('error_message') or row.get('error_code') or row.get('status')}）")
+    return "\n".join(lines) or "本次未產出可顯示的結果；請查看附件中的完整紀錄。"
+
+
 def redact(text):
     secrets = [value for key, value in os.environ.items()
                if value and any(word in key.upper() for word in
@@ -98,7 +118,7 @@ def main():
         elif balance.get("error_code") == "login_unconfirmed" or (
                 balance.get("status") == "error" and "驗證" in balance.get("error_message", "")):
             header += f"{balance['bank_name']}：登入／驗證未完成；無法確認是否為 OTP。\n"
-    for part in chunks(redact(header) + "\n" + output):
+    for part in chunks(redact(header + "\n" + summary_text(output, report.get("balances", [])))):
         request_telegram(token, "sendMessage", json.dumps(
             {"chat_id": chat_id, "text": part}, ensure_ascii=False).encode(), "application/json")
     # Include all structured results, not just the terminal summary.
