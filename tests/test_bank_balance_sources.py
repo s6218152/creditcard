@@ -57,6 +57,23 @@ def test_dbs_credit_card_only_page_is_not_a_deposit_balance(page):
         read_dbs_twd_balance(page)
 
 
+@pytest.mark.parametrize("timer,expected", [(True, True), (False, False)])
+def test_esun_new_dashboard_recognizes_session_without_visible_logout(page, timer, expected):
+    from bank_login import has_logged_in
+    from manual_bank_balance import is_bank_url, read_esun_twd_balance
+    countdown = '<div>184 秒後自動登出，點擊重新計時</div>' if timer else ''
+    load_mock_page(page, "https://ebank.esunbank.com.tw/dashboard", countdown + """
+        <div>信用卡應繳金額 2,100</div><div>等值新臺幣 1,005</div>
+        <section class="widget-balance-detail-container">
+          <h2>臺幣存款總覽</h2><div>活存支存餘額</div><div>984</div>
+          <div>定存本金餘額</div><div>16</div>
+        </section>
+    """)
+    assert has_logged_in(page, lambda u: is_bank_url(u, "esun"), bank="esun") is expected
+    if expected:
+        assert read_esun_twd_balance(page) == Decimal("1000")
+
+
 def test_chb_waits_for_loading_layer_started_by_menu(page):
     from manual_bank_balance import click_chb_navigation
     load_mock_page(page, "https://www.chb.com.tw/netbank/overview", """

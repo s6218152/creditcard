@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   report:
-    runs-on: ubuntu-latest
+    # CTBC and Shanghai's public login pages reject Linux.
+    runs-on: macos-15-intel
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +25,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y tesseract-ocr xvfb
+          if ! command -v tesseract >/dev/null; then
+            brew install tesseract
+          fi
           python -m pip install -r requirements.txt
       - name: Run pipeline and deliver report
         env:
@@ -36,4 +40,4 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REPORT_ENV: ${{ secrets.REPORT_ENV }}
           REPORT_BANKS: ${{ inputs.banks }}
-        run: xvfb-run -a python telegram_report.py
+        run: python telegram_report.py

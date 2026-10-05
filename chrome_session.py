@@ -56,7 +56,8 @@ def system_chrome_context(playwright):
             debug_port = listener.getsockname()[1]
         process = subprocess.Popen(
             [executable, f"--user-data-dir={profile}", "--remote-debugging-address=127.0.0.1",
-             f"--remote-debugging-port={debug_port}", "--no-first-run", "--no-default-browser-check", "about:blank"],
+             f"--remote-debugging-port={debug_port}", "--no-first-run", "--no-default-browser-check",
+             "--window-size=1440,1000", "about:blank"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         browser = None

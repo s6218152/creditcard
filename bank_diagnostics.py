@@ -120,7 +120,12 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
                        "element is not enabled": "disabled",
                        "element is not visible": "not_visible",
                        "element is not stable": "not_stable",
-                       "strict mode violation": "multiple_matches"}
+                       "strict mode violation": "multiple_matches",
+                       "execution context was destroyed": "navigation_context_replaced",
+                       "frame was detached": "frame_detached",
+                       "frame has been detached": "frame_detached",
+                       "cannot find context": "navigation_context_replaced",
+                       "target page, context or browser has been closed": "browser_closed"}
             interactions = [label for phrase, label in reasons.items() if phrase in message]
             if interactions:
                 error.diagnostics.append({"interaction_reasons": interactions})

@@ -48,5 +48,6 @@ def test_context_cleans_profile_and_process_on_error(monkeypatch):
     assert not Path(profile_argument.split("=", 1)[1]).exists()
     assert endpoints[0].startswith("http://127.0.0.1:")
     assert "--remote-debugging-address=127.0.0.1" in commands[0]
+    assert "--window-size=1440,1000" in commands[0]
     assert not any("no-sandbox" in arg or "disable" in arg for arg in commands[0])
     assert calls == ["Browser.close", "disconnect", "terminate", "wait"]

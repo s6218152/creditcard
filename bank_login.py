@@ -81,12 +81,21 @@ def is_logout_href(href):
     return "logout" in value and "loginlogout" not in value
 
 
-def has_logged_in(page, is_official):
+def has_logged_in(page, is_official, *, bank=None):
     if not is_official(page.url):
         return False
     for frame in page.frames:
         if not is_official(frame.url):
             continue
+        if bank == "esun":
+            # The September 2026 dashboard hides logout inside its menu.
+            # Require both an active-session countdown and the bank's TWD
+            # deposit widget; public card/balance examples are insufficient.
+            timers = frame.get_by_text(re.compile(r"秒後自動登出[，,]\s*點擊重新計時"))
+            widgets = frame.locator(".widget-balance-detail-container:visible").filter(
+                has=frame.get_by_text("臺幣存款總覽", exact=True))
+            if widgets.count() == 1 and any(timers.nth(i).is_visible() for i in range(timers.count())):
+                return True
         matches = frame.get_by_text(re.compile(r"^\s*(?:登出|會員登出|登出網路銀行|安全登出|簽出|Logout|Log out|Sign out)\s*$", re.I))
         if any(matches.nth(i).is_visible() for i in range(matches.count())):
             return True

@@ -702,7 +702,7 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
                         click_balance_navigation(page, bank, visited)
                         page.wait_for_timeout(250)
                         continue
-                if has_logged_in(page, is_official):
+                if has_logged_in(page, is_official, bank=bank):
                     logged_in = True
                 if logged_in:
                     if dismiss_balance_notice(page, bank):
