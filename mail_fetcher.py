@@ -88,7 +88,10 @@ def is_excluded_email(subject, local_filters, sender=""):
         belongs_to_bank = (bank in original_subject or bank in (sender or "") or
                            any(sender_domain == domain or sender_domain.endswith("." + domain)
                                for domain in domains))
-        if belongs_to_bank and original_subject not in rule.get("exact_subjects", []):
+        allowed = (original_subject in rule.get("exact_subjects", []) or
+                   any(re.fullmatch(pattern, original_subject)
+                       for pattern in rule.get("subject_regexes", [])))
+        if belongs_to_bank and not allowed:
             return True
     subject = (subject or "").casefold()
     for pattern in local_filters.get("exclude_subjects", []):

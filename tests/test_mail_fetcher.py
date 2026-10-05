@@ -18,14 +18,19 @@ import yaml
 
 @pytest.mark.parametrize("subject,sender,allowed", [
     ("國泰世華銀行信用卡2026年8月電子帳單", "國泰世華銀行 <notice@example.com>", True),
-    ("國泰世華銀行信用卡2026年9月電子帳單", "notice@example.com", False),
+    ("國泰世華銀行信用卡2026年9月電子帳單", "notice@example.com", True),
+    ("國泰世華銀行信用卡2027年01月電子帳單", "notice@example.com", True),
+    ("國泰世華銀行信用卡2027年12月電子帳單", "notice@example.com", True),
+    ("國泰世華銀行信用卡2027年13月電子帳單", "notice@example.com", False),
+    ("國泰世華銀行信用卡2027年0月電子帳單", "notice@example.com", False),
+    ("國泰世華銀行信用卡2027年1月電子帳單通知", "notice@example.com", False),
     ("Re: 國泰世華銀行信用卡2026年8月電子帳單", "notice@example.com", False),
     ("國泰世華銀行貸款通知", "notice@example.com", False),
     ("本期電子對帳單", "國泰世華銀行 <notice@example.com>", False),
     ("電子對帳單", "notice@bill.cathaybk.com.tw", False),
     ("彰化銀行2026年9月份信用卡帳單", "notice@example.com", True),
 ])
-def test_cathay_subject_requires_exact_configured_title(subject, sender, allowed):
+def test_cathay_subject_requires_statement_title_with_valid_year_month(subject, sender, allowed):
     config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
     assert matches_email_filter(subject, sender, config["mail"]["local_filters"]) is allowed
 
@@ -33,7 +38,7 @@ def test_cathay_subject_requires_exact_configured_title(subject, sender, allowed
 def test_rejected_cathay_message_never_fetches_body(monkeypatch):
     config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
     message = EmailMessage()
-    message["Subject"] = "國泰世華銀行信用卡2026年9月電子帳單"
+    message["Subject"] = "國泰世華銀行信用卡活動通知"
     message["From"] = "notice@cathaybk.com.tw"
     calls = []
     class Mail:
