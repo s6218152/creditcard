@@ -17,6 +17,7 @@ from playwright.sync_api import sync_playwright
 
 from chrome_session import system_chrome_context
 from bank_diagnostics import diagnostic_chrome_context
+from bank_login import BankQueryError
 
 
 # Use the current standalone Internet Banking login, not the legacy header form.
@@ -109,6 +110,13 @@ def login_from_environment(page) -> bool:
     except PlaywrightError as error:
         # A service error must not be misreported as a selector timeout.
         read_bank_page(page)
+        if ("intercepts pointer events" in str(error) and
+                page.locator('.modal-header:visible, h5.modal-title:visible').count()):
+            raise BankQueryError(
+                "中信登入按鈕被銀行提示視窗遮擋；需人工確認提示內容。"
+                "本次不會強制點擊或重送帳密；可用 --manual-login 自行登入。",
+                "login_notice_blocked",
+            ) from error
         raise ValueError(
             "中信新版登入表單未完成載入或操作逾時；尚未確認登入成功。"
             "可加 --manual-login 自行登入；不會自動重送帳密。"

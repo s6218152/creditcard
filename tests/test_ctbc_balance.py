@@ -88,6 +88,24 @@ def test_login_entry_error_does_not_fill_or_submit(monkeypatch):
     assert not filled and not clicked
 
 
+def test_blocking_notice_is_not_misreported_as_form_timeout(monkeypatch):
+    from ctbc_balance import login_from_environment
+    from bank_login import BankQueryError
+    from playwright.sync_api import TimeoutError
+    for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):
+        monkeypatch.setenv(key, "test-value")
+    page, filled, clicked = login_page()
+    def blocked(**kwargs):
+        raise TimeoutError('<h5 class="modal-title">private-notice</h5> intercepts pointer events')
+    page.get_by_role = lambda *args, **kwargs: SimpleNamespace(click=blocked)
+    with pytest.raises(BankQueryError) as caught:
+        login_from_environment(page)
+    assert caught.value.code == "login_notice_blocked"
+    assert "提示視窗" in str(caught.value)
+    assert "private-notice" not in str(caught.value)
+    assert len(filled) == 3 and not clicked
+
+
 @pytest.mark.parametrize("url", [
     "https://ctbcbank.com.evil.example/twrbc/twrbc-general/ot001/010",
     "https://www.ctbcbank.com/content/dam/ctbc-ib/zh_rb/general/out_of_service.html",
