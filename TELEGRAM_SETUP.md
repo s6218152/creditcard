@@ -16,6 +16,8 @@ GitHub 排程可能延遲，並不保證 12:00 整收到。
      支援各銀行的 BANK_ID / BANK_USER_ID / BANK_PASSWORD 及獨立設定；請勿把真實值提交進 Git。
 5. 推送後，到 Actions → Monthly Telegram report → Run workflow 手動測試一次。
    排程檔必須存在於預設分支，才能自動執行。
+   手動執行時可填 banks（例如 chb esun），僅測試指定銀行的餘額；
+   信用卡帳單仍全部處理。留白與每月自動排程均查詢全部已啟用銀行。
 
 ## 銀行登入與錯誤
 

@@ -37,6 +37,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
     monkeypatch.setenv("REPORT_ENV", "BANK_PASSWORD=private-password")
     monkeypatch.setenv("BANK_PASSWORD", "private-password")
+    monkeypatch.setenv("REPORT_BANKS", "chb esun")
     (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
     output = tmp_path / "output"
     output.mkdir()
@@ -46,6 +47,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     (output / "statement.json").write_text('{"details": [{"amount": 500}]}')
 
     def run(*args, **kwargs):
+        assert args[0] == [report.sys.executable, "main.py", "--bank", "chb", "--bank", "esun"]
         kwargs["stdout"].write("帳單完成 private-password".encode())
         return SimpleNamespace(returncode=1)
 
@@ -55,6 +57,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
     assert report.main() == 1
     assert "需要人工驗證" in messages[0]["text"]
+    assert "本次僅測試銀行餘額：chb、esun" in messages[0]["text"]
     assert "private-password" not in messages[0]["text"]
     with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
         assert set(archive.namelist()) == {"console.txt", "latest.json", "statement.json"}

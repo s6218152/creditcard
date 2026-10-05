@@ -4,6 +4,11 @@ on:
     # UTC 04:00 = Asia/Taipei 12:00; execution and delivery may be delayed.
     - cron: '0 4 1,15 * *'
   workflow_dispatch:
+    inputs:
+      banks:
+        description: '僅查指定銀行（代碼以空格分隔）；留白查詢全部銀行'
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -30,4 +35,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REPORT_ENV: ${{ secrets.REPORT_ENV }}
+          REPORT_BANKS: ${{ inputs.banks }}
         run: xvfb-run -a python telegram_report.py

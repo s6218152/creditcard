@@ -71,7 +71,11 @@ def main():
     # Do not stream bank/email errors or credentials into public Actions logs.
     with tempfile.TemporaryFile() as log:
         try:
-            result = subprocess.run([sys.executable, "main.py"], stdout=log,
+            command = [sys.executable, "main.py"]
+            banks = os.getenv("REPORT_BANKS", "").split()
+            for bank in banks:
+                command.extend(["--bank", bank])
+            result = subprocess.run(command, stdout=log,
                                     stderr=subprocess.STDOUT, timeout=2400)
             succeeded = result.returncode == 0
         except subprocess.TimeoutExpired:
@@ -80,6 +84,8 @@ def main():
         log.seek(0)
         output = redact(log.read().decode("utf-8", errors="replace"))
     header = "信用卡完整報告\n" + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
+    if banks:
+        header += "本次僅測試銀行餘額：" + "、".join(banks) + "\n"
     config = yaml.safe_load(Path("config.yaml").read_text())
     output_dir = Path(config["storage"]["output_dir"])
     latest = output_dir / "latest.json"

@@ -1,5 +1,7 @@
 """Record bank-page structure on failure without credentials or account data."""
 from contextlib import contextmanager
+from pathlib import Path
+import traceback
 from urllib.parse import urlparse
 
 from chrome_session import system_chrome_context
@@ -64,4 +66,10 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
         except Exception as error:
             error.diagnostics = [collect_page_diagnostics(page, bank, is_official)
                                  for page in getattr(context, "pages", []) if not page.is_closed()]
+            trace = [{"file": Path(item.filename).name, "line": item.lineno, "function": item.name}
+                     for item in traceback.extract_tb(error.__traceback__)
+                     if Path(item.filename).name in ("manual_bank_balance.py", "bank_login.py",
+                                                     "bank_captcha.py", "ctbc_balance.py")]
+            if trace:
+                error.diagnostics.append({"failure_trace": trace})
             raise
