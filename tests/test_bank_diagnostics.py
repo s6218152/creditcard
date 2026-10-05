@@ -41,12 +41,16 @@ def test_context_retains_original_error_and_collects_before_closing():
             yield SimpleNamespace(pages=[page])
         finally:
             events.append("closed")
-    original = ValueError("private-credential: element intercepts pointer events")
+    original = ValueError('private-credential: <div class="modal-backdrop" id="private-id" '
+                          'value="private-value">private-text</div> intercepts pointer events')
     with pytest.raises(ValueError) as caught:
         with diagnostic_chrome_context(None, "ctbc", lambda url: False, context_factory):
             raise original
     assert caught.value is original
     assert original.diagnostics[0]["official_page"] is False
-    assert original.diagnostics[-1]["interaction_reasons"] == ["pointer_intercepted"]
+    assert original.diagnostics[-2]["interaction_reasons"] == ["pointer_intercepted"]
+    assert original.diagnostics[-1]["click_interceptors"] == [{"tag": "div", "classes": ["modal-backdrop"]}]
     assert "private-credential" not in json.dumps(original.diagnostics)
+    assert all(value not in json.dumps(original.diagnostics)
+               for value in ("private-id", "private-value", "private-text"))
     assert events == ["closed"]

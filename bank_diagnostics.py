@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 import traceback
+import re
 from urllib.parse import urlparse
 
 from chrome_session import system_chrome_context
@@ -96,4 +97,19 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
             interactions = [label for phrase, label in reasons.items() if phrase in message]
             if interactions:
                 error.diagnostics.append({"interaction_reasons": interactions})
+            interceptors = []
+            for line in str(cause).splitlines():
+                if "intercepts pointer events" not in line:
+                    continue
+                for tag, attributes in re.findall(r'<([a-z][\w-]*)\b([^>]*)>', line):
+                    classes = re.search(r'\bclass="([^"]*)"', attributes)
+                    # Only structural class names, never text, IDs, values,
+                    # hrefs, or the complete action log.
+                    names = [name for name in (classes.group(1).split() if classes else [])
+                             if re.fullmatch(r'[a-zA-Z_-]{1,60}', name)]
+                    item = {"tag": tag, "classes": names[:8]}
+                    if item not in interceptors:
+                        interceptors.append(item)
+            if interceptors:
+                error.diagnostics.append({"click_interceptors": interceptors[:8]})
             raise
