@@ -17,4 +17,15 @@ MANUAL_BANKS = {
 }
 SUPPORTED_BANKS = {"ctbc", "sinopac", *MANUAL_BANKS}
 
+
+def normalize_bank(value):
+    aliases = {name: key for key, (name, *_) in MANUAL_BANKS.items()}
+    aliases.update({name.removesuffix("銀行"): key for name, key in list(aliases.items())})
+    aliases.update({"中國信託": "ctbc", "中信": "ctbc", "永豐銀行": "sinopac",
+                    "永豐": "sinopac", "上海": "shanghai", "彰銀": "chb", "富邦": "fubon"})
+    key = aliases.get(value, value.lower())
+    if key not in SUPPORTED_BANKS:
+        raise ValueError(f"不支援的銀行名稱或代碼：{value}")
+    return key
+
 AUTO_BANKS = {**MANUAL_BANKS, "sinopac": ("永豐銀行", "https://mma.sinopac.com/MemberPortal/Member/MMALogin.aspx", ("sinopac.com",))}

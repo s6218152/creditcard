@@ -3,6 +3,14 @@ import json
 import telegram_report as report
 
 
+def test_bank_names_accept_chinese_aliases():
+    from bank_registry import normalize_bank
+    assert normalize_bank("上海") == "shanghai"
+    assert normalize_bank("彰銀") == "chb"
+    assert normalize_bank("玉山銀行") == "esun"
+    assert normalize_bank("CTBC") == "ctbc"
+
+
 def test_chunks_preserve_all_text_and_respect_telegram_units():
     text = "帳單😀\n" * 3000
     parts = list(report.chunks(text))
@@ -53,7 +61,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
     monkeypatch.setenv("REPORT_ENV", "BANK_PASSWORD=private-password")
     monkeypatch.setenv("BANK_PASSWORD", "private-password")
-    monkeypatch.setenv("REPORT_BANKS", "chb esun")
+    monkeypatch.setenv("REPORT_BANKS", "彰銀、玉山銀行")
     (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
     output = tmp_path / "output"
     output.mkdir()

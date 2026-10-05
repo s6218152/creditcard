@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       banks:
-        description: '僅查指定銀行（代碼以空格分隔）；留白查詢全部銀行'
+        description: '指定銀行名稱或代碼（空格或逗號分隔，如 上海 彰銀）；留白查全部'
         required: false
         default: ''
 permissions:

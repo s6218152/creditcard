@@ -417,10 +417,10 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
 
 if __name__ == "__main__":
     import argparse
-    from bank_registry import SUPPORTED_BANKS
+    from bank_registry import SUPPORTED_BANKS, normalize_bank
     parser = argparse.ArgumentParser(description="產出信用卡帳單清單，並在各銀行繳款截止日下方附上即時餘額")
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--bank", choices=sorted(SUPPORTED_BANKS), action="append",
+    parser.add_argument("--bank", type=normalize_bank, choices=sorted(SUPPORTED_BANKS), action="append",
                         help="帳單完成後只查指定銀行的餘額，可重複使用")
     args = parser.parse_args()
     raise SystemExit(0 if run_pipeline(args.config, balance_banks=args.bank) else 1)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from bank_registry import MANUAL_BANKS
+from bank_registry import MANUAL_BANKS, normalize_bank
 
 BANKS = {"ctbc": ("中國信託", "ctbc_balance"), "sinopac": ("永豐銀行", "sinopac_balance")}
 
@@ -85,7 +85,7 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
 def main() -> int:
     parser = argparse.ArgumentParser(description="查詢已啟用銀行的即時存款餘額")
     parser.add_argument("--config", default=str(Path(__file__).with_name("config.yaml")))
-    parser.add_argument("--bank", choices=tuple(BANKS), action="append", help="只查指定銀行，可重複使用")
+    parser.add_argument("--bank", type=normalize_bank, choices=tuple(BANKS), action="append", help="只查指定銀行，可重複使用")
     args = parser.parse_args()
     try:
         with open(args.config, encoding="utf-8") as handle:

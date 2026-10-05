@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,12 +13,13 @@ from urllib.request import Request, urlopen
 
 import yaml
 from dotenv import dotenv_values
+from bank_registry import normalize_bank
 
 
 def summary_text(output, balances):
     prefixes = ("銀行:", "本期應繳總金額:", "繳款截止日:", "臺幣存款餘額:",
                 "臺幣活期存款餘額:", "存款餘額:", "提醒：", "檔案:",
-                "注意：本次部分下載流程失敗", "雲端執行逾時")
+                "注意：本次部分下載流程失敗", "雲端執行逾時", "銀行篩選設定錯誤：")
     lines = []
     standalone = tuple(row.get("bank_name", "") + label for row in balances
                        for label in ("臺幣存款餘額:", "臺幣活期存款餘額:", "存款餘額:"))
@@ -89,10 +91,12 @@ def main():
         raise RuntimeError("請設定 TELEGRAM_BOT_TOKEN 與 TELEGRAM_CHAT_ID")
 
     # Do not stream bank/email errors or credentials into public Actions logs.
+    banks = []
     with tempfile.TemporaryFile() as log:
         try:
             command = [sys.executable, "main.py"]
-            banks = os.getenv("REPORT_BANKS", "").split()
+            banks = list(dict.fromkeys(normalize_bank(value) for value in
+                         re.split(r'[\s,，、]+', os.getenv("REPORT_BANKS", "").strip()) if value))
             for bank in banks:
                 command.extend(["--bank", bank])
             result = subprocess.run(command, stdout=log,
@@ -101,6 +105,9 @@ def main():
         except subprocess.TimeoutExpired:
             succeeded = False
             log.write("\n雲端執行逾時；以下為已完成的部分結果。\n".encode())
+        except ValueError as error:
+            succeeded = False
+            log.write(f"銀行篩選設定錯誤：{error}\n".encode())
         log.seek(0)
         output = redact(log.read().decode("utf-8", errors="replace"))
     header = "信用卡完整報告\n" + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
