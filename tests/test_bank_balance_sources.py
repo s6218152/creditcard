@@ -57,6 +57,34 @@ def test_dbs_credit_card_only_page_is_not_a_deposit_balance(page):
         read_dbs_twd_balance(page)
 
 
+def test_chb_waits_for_loading_layer_started_by_menu(page):
+    from manual_bank_balance import click_chb_navigation
+    load_mock_page(page, "https://www.chb.com.tw/netbank/overview", """
+        <style>
+          body {height:3000px;margin:0}
+          header {position:fixed;top:0;left:0;width:100%;height:120px;background:white;z-index:10}
+          nav {position:absolute;top:800px}
+          a {display:block;width:200px;height:40px}
+          #menu {position:absolute;top:250px}
+          #loading-icon-wrap.show {position:fixed;inset:0;background:white;z-index:20}
+        </style>
+        <header class="header fixed">固定頁首</header>
+        <nav>
+          <a id="menu" data-txnmenuid="TW" onclick="
+            document.getElementById('loading-icon-wrap').className='show';
+            setTimeout(()=>document.getElementById('loading-icon-wrap').className='',5500)
+          ">臺幣存款</a>
+          <a data-url="../TxnPage/tw#!/tw01001_1" onclick="window.entryClicked=true">活期餘額</a>
+        </nav>
+        <div id="loading-icon-wrap"></div>
+    """)
+    page.evaluate("window.scrollTo(0,750)")
+    visited = set()
+    assert click_chb_navigation(page, visited)
+    assert page.evaluate("window.entryClicked") is True
+    assert "chb_twd_menu" in visited
+
+
 def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     from ctbc_balance import LOGIN_URL, login_from_environment
     for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):

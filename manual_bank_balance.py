@@ -445,6 +445,10 @@ def click_chb_navigation(page, visited):
             if entry.count() != 1:
                 raise ValueError("未找到唯一的彰銀新臺幣活期餘額入口")
             try:
+                # Opening the menu can start another loading layer. The
+                # pre-menu check cannot protect this subsequent click.
+                frame.locator("#loading-icon-wrap.show:visible").wait_for(
+                    state="hidden", timeout=15_000)
                 entry.click(timeout=5000)
             except PlaywrightError as error:
                 # Distinguish a hidden template link from an unavailable menu.

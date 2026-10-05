@@ -59,7 +59,9 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     output.mkdir()
     (output / "latest.json").write_text(json.dumps({
         "files": ["statement.json"], "balances": [{"bank_name": "測試銀行",
-        "status": "error", "error_code": "verification_required"}]}))
+        "status": "error", "error_code": "verification_required"},
+        {"bank_name": "上海商銀", "status": "error", "error_code": "login_form_unavailable",
+         "error_message": "未找到已驗證的個人網銀登入表單，未送出帳密"}]}))
     (output / "statement.json").write_text('{"details": [{"amount": 500}]}')
 
     def run(*args, **kwargs):
@@ -73,6 +75,8 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
     assert report.main() == 1
     assert "需要人工驗證" in messages[0]["text"]
+    assert "上海商銀：登入／驗證未完成" not in messages[0]["text"]
+    assert "未找到已驗證的個人網銀登入表單" in messages[0]["text"]
     assert "本次僅測試銀行餘額：chb、esun" in messages[0]["text"]
     assert "private-password" not in messages[0]["text"]
     assert "fontTools" not in messages[0]["text"]
