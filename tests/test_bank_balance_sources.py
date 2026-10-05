@@ -55,3 +55,23 @@ def test_dbs_credit_card_only_page_is_not_a_deposit_balance(page):
                    "<div>信用卡 帳戶餘額 TWD 1,051</div>")
     with pytest.raises(ValueError):
         read_dbs_twd_balance(page)
+
+
+def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
+    from ctbc_balance import LOGIN_URL, login_from_environment
+    for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):
+        monkeypatch.setenv(key, "test-credential")
+    load_mock_page(page, LOGIN_URL, """
+        <input placeholder="搜尋">
+        <input formcontrolname="custIxd">
+        <input formcontrolname="userIxd">
+        <input formcontrolname="pxd" type="password">
+        <button type="button" onclick="window.loginClicks=(window.loginClicks||0)+1">登入</button>
+    """)
+    wait = page.wait_for_function
+    def bounded_wait(*args, **kwargs):
+        kwargs["timeout"] = 100
+        return wait(*args, **kwargs)
+    monkeypatch.setattr(page, "wait_for_function", bounded_wait)
+    assert login_from_environment(page)
+    assert page.evaluate("window.loginClicks") == 1

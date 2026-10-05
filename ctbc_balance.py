@@ -79,22 +79,24 @@ def login_from_environment(page) -> bool:
         raise ValueError("請完整設定 CTBC_ID、CTBC_USER_ID、CTBC_PASSWORD")
     if not is_ctbc_url(page.url):
         raise ValueError("登入頁不是中國信託官方 HTTPS 網址")
-    # The current form has three visible inputs and a native login button.
-    # Waiting for the form, rather than only `load`, also covers SPA redirects.
+    selectors = (
+        'input[formcontrolname="custIxd"]:visible',
+        'input[formcontrolname="userIxd"]:visible',
+        'input[formcontrolname="pxd"]:visible',
+    )
+    # Wait for the actual credential fields. Unrelated visible inputs (e.g.
+    # responsive search UI) must not block an otherwise complete login form.
     try:
         page.wait_for_function(
-            """() => Array.from(document.querySelectorAll('input'))
-                .filter(el => el.getClientRects().length && el.type !== 'hidden').length === 3""",
+            """selectors => selectors.every(selector =>
+                Array.from(document.querySelectorAll(selector))
+                    .filter(el => el.getClientRects().length && el.type !== 'hidden').length === 1)""",
+            arg=[selector.removesuffix(":visible") for selector in selectors],
             timeout=30_000,
         )
         read_bank_page(page)
         if urlparse(page.url).path.rstrip("/") != "/twrbc/twrbc-general/ot001/010":
             raise ValueError("未進入新版中信登入表單，已停止填寫帳密")
-        selectors = (
-            'input[formcontrolname="custIxd"]:visible',
-            'input[formcontrolname="userIxd"]:visible',
-            'input[formcontrolname="pxd"]:visible',
-        )
         fields = [page.locator(selector) for selector in selectors]
         if any(field.count() != 1 for field in fields):
             raise ValueError("中信登入表單欄位不符，已停止填寫帳密")

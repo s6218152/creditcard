@@ -444,7 +444,20 @@ def click_chb_navigation(page, visited):
             entry = menu.locator("..").locator('a[data-url="../TxnPage/tw#!/tw01001_1"]')
             if entry.count() != 1:
                 raise ValueError("未找到唯一的彰銀新臺幣活期餘額入口")
-            entry.click(timeout=5000)
+            try:
+                entry.click(timeout=5000)
+            except PlaywrightError as error:
+                # Distinguish a hidden template link from an unavailable menu.
+                # Counts and visibility only; no account text or identifiers.
+                try:
+                    error.navigation_state = {
+                        "selected_entry_visible": entry.is_visible(),
+                        "visible_matching_entries": frame.locator(
+                            'a[data-url="../TxnPage/tw#!/tw01001_1"]:visible').count(),
+                    }
+                except PlaywrightError:
+                    error.navigation_state = {"state": "page_unavailable"}
+                raise
             visited.add("chb_twd_menu")
             return True
         parsed = urlparse(frame.url)

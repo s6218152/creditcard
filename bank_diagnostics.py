@@ -52,6 +52,7 @@ def collect_page_diagnostics(page, bank, is_official):
             if bank == "ctbc":
                 item["login_fields"] = [frame.locator(f'input[formcontrolname="{name}"]:visible').count()
                                         for name in ("custIxd", "userIxd", "pxd")]
+                item["visible_input_count"] = frame.locator("input:visible").count()
             result["frames"].append(item)
         except Exception:
             result["frames"].append({"state": "page_unavailable"})
@@ -66,10 +67,14 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
         except Exception as error:
             error.diagnostics = [collect_page_diagnostics(page, bank, is_official)
                                  for page in getattr(context, "pages", []) if not page.is_closed()]
+            cause = error.__cause__ or error
             trace = [{"file": Path(item.filename).name, "line": item.lineno, "function": item.name}
-                     for item in traceback.extract_tb(error.__traceback__)
+                     for item in traceback.extract_tb(cause.__traceback__)
                      if Path(item.filename).name in ("manual_bank_balance.py", "bank_login.py",
                                                      "bank_captcha.py", "ctbc_balance.py")]
             if trace:
                 error.diagnostics.append({"failure_trace": trace})
+            navigation = getattr(cause, "navigation_state", None)
+            if navigation:
+                error.diagnostics.append({"navigation": navigation})
             raise
