@@ -28,6 +28,8 @@ class CaptchaSpec:
     tile_gap: int = 0
     rendered_image: bool = False
     consensus_fallback: bool = False
+    all_model_consensus: bool = False
+    natural_image: bool = False
 
 
 CAPTCHA_IMAGES = {
@@ -38,7 +40,8 @@ CAPTCHA_IMAGES = {
     "hncb": CaptchaSpec("#code_Cap", 4, 'a[onclick="chgCaptcha();"]', consensus_fallback=True),
     "taishin": CaptchaSpec("img._field_item__verify-code", 6, "button.js-btn-refresh"),
     "shanghai": CaptchaSpec(".ved_img", 5, "button.chg_link", background=True),
-    "first_bank": CaptchaSpec("#code_verify", 4, 'a[onclick*="chgImg"]', "alnum", consensus_fallback=True),
+    "first_bank": CaptchaSpec("#code_verify", 4, 'a[onclick*="chgImg"]', "alnum",
+                             consensus_fallback=True, all_model_consensus=True, natural_image=True),
     "skbank": CaptchaSpec(".verify img", 4, "a.icon__login--refresh", "alnum", tiles=4,
                           tile_border=2, tile_gap=8, consensus_fallback=True),
     "ubot": CaptchaSpec('img[alt="CAPTCHA"]', 6,
@@ -160,12 +163,23 @@ def _tesseract_agrees(image, expected):
     return _tesseract_text(image) == expected
 
 
-def _worker_result(image, length, alphabet="digits", consensus_fallback=False):
+def _worker_result(image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False):
     if not image or len(image) > 512_000:
         return Recognition(None, "invalid_image")
     try:
         results = [_decode_result(_model(beta).classification(image, probability=True), length, alphabet)
                    for beta in (False, True)]
+        if all_model_consensus:
+            if not all(results):
+                return Recognition(None, "invalid_format")
+            if results[0][0].casefold() != results[1][0].casefold():
+                return Recognition(None, "model_disagreement")
+            if any(min(result[1], default=0) < MIN_INDEPENDENT_CONFIDENCE for result in results):
+                return Recognition(None, "low_confidence")
+            independent = _tesseract_text(image)
+            if independent and independent.casefold() == results[0][0].casefold():
+                return Recognition(independent, "three_model_consensus")
+            return Recognition(None, "low_confidence")
         if consensus_fallback and (not all(results) or results[0][0] != results[1][0]):
             candidates = {result[0] for result in results if result and
                           min(result[1], default=0) >= MIN_INDEPENDENT_CONFIDENCE}
@@ -198,17 +212,17 @@ def _worker_result(image, length, alphabet="digits", consensus_fallback=False):
         return Recognition(None, "ocr_error")
 
 
-def _recognize_in_worker(image, length, alphabet="digits", consensus_fallback=False):
-    return _worker_result(image, length, alphabet, consensus_fallback).text
+def _recognize_in_worker(image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False):
+    return _worker_result(image, length, alphabet, consensus_fallback, all_model_consensus).text
 
 
-def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=False):
+def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False):
     if not image or len(image) > 512_000 or length not in (4, 5, 6) or alphabet not in ("digits", "alnum"):
         return Recognition(None, "invalid_image")
     try:
         # Isolate native OCR threads from Playwright's browser event loop.
         result = subprocess.run([sys.executable, str(Path(__file__).resolve()), str(length), alphabet,
-                                 "consensus" if consensus_fallback else "strict"],
+                                 "all-consensus" if all_model_consensus else "consensus" if consensus_fallback else "strict"],
                                 input=image, capture_output=True, timeout=20)
         if result.returncode:
             return Recognition(None, "worker_crashed")
@@ -218,6 +232,8 @@ def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=Fals
         if text is None and reason in REASONS:
             return Recognition(None, reason)
         if isinstance(text, str) and re.fullmatch(rf"{allowed}{{{length}}}", text) and reason in ("strong_agreement", "three_model_consensus", "independent_ocr_consensus"):
+            if all_model_consensus and reason != "three_model_consensus":
+                return Recognition(None, "invalid_response")
             if reason != "strong_agreement" and not consensus_fallback:
                 return Recognition(None, "invalid_response")
             return Recognition(text, reason)
@@ -258,7 +274,18 @@ def _image_bytes(images, spec):
                         if (!e.complete || !e.naturalWidth) throw Error('image not ready');
                     } finally { clearTimeout(timer); }
                 }""")
-            pictures.append(item.screenshot(timeout=5000))
+            if spec.natural_image:
+                # Read the already-loaded pixels without another CAPTCHA request.
+                # First Bank scales 67x29 images to 59x25 in its login form.
+                encoded = item.evaluate("""e => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = e.naturalWidth; canvas.height = e.naturalHeight;
+                    canvas.getContext('2d').drawImage(e, 0, 0);
+                    return canvas.toDataURL('image/png').split(',')[1];
+                }""")
+                pictures.append(base64.b64decode(encoded, validate=True))
+            else:
+                pictures.append(item.screenshot(timeout=5000))
     if spec.tiles == 1:
         return sources, pictures[0]
     from PIL import Image
@@ -295,7 +322,8 @@ def _fill_once(page, frame, spec, field, is_official):
     if field.input_value():
         return False
     sources, image = _image_bytes(images, spec)
-    result = run_captcha_worker(image, spec.length, spec.alphabet, spec.consensus_fallback)
+    result = run_captcha_worker(image, spec.length, spec.alphabet, spec.consensus_fallback,
+                                spec.all_model_consensus)
     if not result.text:
         raise CaptchaError(REASONS[result.reason], "captcha_ocr_unavailable" if result.reason in
                            ("dependency_missing", "ocr_error", "worker_crashed", "worker_timeout", "worker_unavailable", "invalid_response")
@@ -352,7 +380,8 @@ def try_fill_captcha(page, frame, bank, field, is_official):
 
 if __name__ == "__main__":
     if (len(sys.argv) != 4 or sys.argv[1] not in ("4", "5", "6") or
-            sys.argv[2] not in ("digits", "alnum") or sys.argv[3] not in ("strict", "consensus")):
+            sys.argv[2] not in ("digits", "alnum") or sys.argv[3] not in ("strict", "consensus", "all-consensus")):
         raise SystemExit(2)
-    result = _worker_result(sys.stdin.buffer.read(512_001), int(sys.argv[1]), sys.argv[2], sys.argv[3] == "consensus")
+    result = _worker_result(sys.stdin.buffer.read(512_001), int(sys.argv[1]), sys.argv[2],
+                            sys.argv[3] != "strict", sys.argv[3] == "all-consensus")
     sys.stdout.write(json.dumps({"text": result.text, "reason": result.reason}))

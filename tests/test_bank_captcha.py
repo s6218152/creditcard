@@ -140,4 +140,21 @@ def test_alphanumeric_banks_use_exact_independent_case_with_model_corroboration(
     assert bank_captcha._recognize_in_worker(b"image", 4, "alnum") is None
     spec = bank_captcha.CAPTCHA_IMAGES[bank]
     assert bank_captcha._recognize_in_worker(b"image", spec.length, spec.alphabet,
-                                             spec.consensus_fallback) == (reading if accepted else None)
+                                             spec.consensus_fallback, spec.all_model_consensus) == (reading if accepted else None)
+
+
+@pytest.mark.parametrize("alternate, confidence, independent, accepted", [
+    ("abCD", 0.7, "ABCD", True),
+    ("ABCE", 0.999, "ABCD", False),
+    ("ABCD", 0.999, "ABCE", False),
+    ("ABCD", 0.999, None, False),
+    ("ABCD", 0.4, "ABCD", False),
+])
+def test_first_bank_requires_all_three_models_even_with_strong_predictions(monkeypatch, alternate, confidence, independent, accepted):
+    monkeypatch.setattr(bank_captcha, "_model", lambda beta: SimpleNamespace(
+        classification=lambda *a, **kw: prediction(alternate if beta else "ABCD", confidence)))
+    monkeypatch.setattr(bank_captcha, "_tesseract_text", lambda image: independent)
+    spec = bank_captcha.CAPTCHA_IMAGES["first_bank"]
+    result = bank_captcha._worker_result(b"image", spec.length, spec.alphabet,
+                                        spec.consensus_fallback, spec.all_model_consensus)
+    assert result.text == (independent if accepted else None)

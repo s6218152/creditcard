@@ -138,7 +138,7 @@ def _check_login_error(page, is_official):
     for frame in page.frames:
         if not is_official(frame.url):
             continue
-        dialogs = frame.locator('[role="alert"], [role="dialog"], .error-message, .alert-danger, .errorMsg, .login-error, .swal2-popup, .ui-dialog, .modal.show, [class*="Pure__StatusBar-"]')
+        dialogs = frame.locator('[role="alert"], [role="dialog"], .error-message, .alert-danger, .errorMsg, .login-error, .swal2-popup, .ui-dialog, .modal.show, .pop-hint, [class*="Pure__StatusBar-"]')
         for index in range(dialogs.count()):
             dialog = dialogs.nth(index)
             if not dialog.is_visible():
