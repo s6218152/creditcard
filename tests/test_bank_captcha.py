@@ -132,9 +132,12 @@ def test_independent_ocr_can_confirm_one_supported_complete_candidate(monkeypatc
 
 
 @pytest.mark.parametrize("reading, accepted", [("ABCD", True), ("ABCE", False), (None, False)])
-def test_shin_kong_uses_exact_independent_case_with_model_corroboration(monkeypatch, reading, accepted):
+@pytest.mark.parametrize("bank", ["skbank", "first_bank"])
+def test_alphanumeric_banks_use_exact_independent_case_with_model_corroboration(monkeypatch, reading, accepted, bank):
     monkeypatch.setattr(bank_captcha, "_model", lambda beta: SimpleNamespace(
         classification=lambda *a, **kw: prediction("ABCD" if beta else "abcD", 0.7)))
     monkeypatch.setattr(bank_captcha, "_tesseract_text", lambda image: reading)
     assert bank_captcha._recognize_in_worker(b"image", 4, "alnum") is None
-    assert bank_captcha._recognize_in_worker(b"image", 4, "alnum", True) == (reading if accepted else None)
+    spec = bank_captcha.CAPTCHA_IMAGES[bank]
+    assert bank_captcha._recognize_in_worker(b"image", spec.length, spec.alphabet,
+                                             spec.consensus_fallback) == (reading if accepted else None)

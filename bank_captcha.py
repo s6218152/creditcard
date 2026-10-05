@@ -38,7 +38,7 @@ CAPTCHA_IMAGES = {
     "hncb": CaptchaSpec("#code_Cap", 4, 'a[onclick="chgCaptcha();"]', consensus_fallback=True),
     "taishin": CaptchaSpec("img._field_item__verify-code", 6, "button.js-btn-refresh"),
     "shanghai": CaptchaSpec(".ved_img", 5, "button.chg_link", background=True),
-    "first_bank": CaptchaSpec("#code_verify", 4, 'a[onclick*="chgImg"]', "alnum"),
+    "first_bank": CaptchaSpec("#code_verify", 4, 'a[onclick*="chgImg"]', "alnum", consensus_fallback=True),
     "skbank": CaptchaSpec(".verify img", 4, "a.icon__login--refresh", "alnum", tiles=4,
                           tile_border=2, tile_gap=8, consensus_fallback=True),
     "ubot": CaptchaSpec('img[alt="CAPTCHA"]', 6,
