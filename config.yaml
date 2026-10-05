@@ -1,0 +1,119 @@
+# Mail configuration
+mail:
+  imap_server: "imap.mail.yahoo.com"
+  port: 993
+  folder: "INBOX"
+  search_mode: "latest_month" # 每次搜尋最新月份的帳單郵件，避免固定天數造成月初遺漏上一個月帳單。
+  
+  # 本地過濾器：主旨或寄件者中必須包含以下任一關鍵字才會被下載與解析
+  local_filters:
+    exclude_subjects:
+      - "*星展銀行(台灣)電子對帳單 - *"
+      - "*【國泰世華銀行】 開放銀行服務訊息通知*"
+      - "*台北富邦銀行*年*月 銀行對帳單*"
+      - "*中國信託銀行電子對帳單 *"
+      - "*臺灣銀行存款電子對帳單*"
+    subjects:
+      - "信用卡消費對帳單"
+      - "信用卡對帳單"
+      - "信用卡帳單"
+      - "電子對帳單"
+      - "中國信託信用卡電子帳單"
+      - "Statement"
+    banks:
+      - "國泰世華"
+      - "玉山銀行"
+      - "台新銀行"
+      - "台北富邦"
+      - "中國信託"
+      - "花旗"
+      - "渣打"
+      - "星展"
+      - "永豐銀行"
+      - "新光銀行"
+      - "遠東商銀"
+      - "聯邦銀行"
+      - "彰化銀行"
+      - "彰銀"
+
+  bank_attachment_patterns:
+    台新銀行:
+      - "TSB_Creditcard_Estatement_*.pdf"
+    玉山銀行:
+      - "ESUN_Estatement_*.pdf"
+    永豐銀行:
+      - "永豐銀行信用卡帳單.pdf"
+    遠東商銀:
+      - "*cycle-statement.pdf"
+    聯邦銀行:
+      - "UBOT_Estatement_*.pdf"
+    彰化銀行:
+      - "*信用卡對帳單.pdf"
+  bank_pdf_passwords:
+    台新銀行: "${TAISHIN_PDF_PASSWORD}"
+    彰化銀行: "${BANK_ID}"
+
+# Local directories
+storage:
+  download_dir: "downloads"
+  output_dir: "output"
+  history_file: "downloads/history.json"
+  pdf_password_patterns:
+    "*CBGCC-DAILYSTMT_*.pdf": "${CBGCC_DAILY_PDF_PASSWORD}"
+    "*ESUN_Estatement_*.pdf": ""
+    "*上海商銀信用卡對帳單*.pdf": "${SHANGHAI_CARD_PDF_PASSWORD}"
+    "*TSB_Creditcard_Estatement_*.pdf": "${TSB_CREDITCARD_PDF_PASSWORD}"
+
+# Daemon scheduling (check interval in hours)
+schedule:
+  interval_hours: 12
+
+# Taipei Fubon sends a protected web link instead of a PDF attachment.
+fubon:
+  enabled: true
+  captcha_retries: 15
+
+# main.py 處理帳單後登入查詢餘額；圖形驗證碼自動辨識，OTP 由使用者完成，無需終端機 Enter。
+balance_query:
+  ctbc:
+    enabled: true
+    balance_selector: ""
+  sinopac:
+    enabled: true
+    balance_selector: ""
+  skbank:
+    enabled: true
+    balance_selector: ""
+  fubon:
+    enabled: true
+    balance_selector: ""
+  first_bank:
+    enabled: true
+    balance_selector: ""
+  esun:
+    enabled: true
+    balance_selector: ""
+  feib:
+    enabled: true
+    balance_selector: ""
+  ubot:
+    enabled: false  # 使用者確認目前無法查詢存款，暫時排除。
+    balance_selector: ""
+  dbs:
+    enabled: true
+    balance_selector: ""
+  shanghai:
+    enabled: true
+    balance_selector: ""
+  taishin:
+    enabled: true
+    balance_selector: ""
+  chb:
+    enabled: true
+    balance_selector: ""
+  cathay:
+    enabled: true
+    balance_selector: ""
+  hncb:
+    enabled: true
+    balance_selector: ""
