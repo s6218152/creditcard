@@ -35,7 +35,7 @@ LOGIN_FORMS = {
     "chb": LoginForm(('input[name="uid_show"]', "#uuid", "#pwd"), "#pb-login", "#captcha"),
     "cathay": LoginForm(("#CustID", "#UserIdKeyin", "#PasswordKeyin"), 'button:text-is("登入")'),
     "hncb": LoginForm(("#USERIDTEXT", "#NICKNAME", "#password"), 'a:text-is("確定登入")', "#TrxCaptchaKey"),
-    "shanghai": LoginForm(("#userId", "#idNumber", "#pppd"), 'button:text-is("登入")', "#verified"),
+    "shanghai": LoginForm(("#userId", "#idNumber", "#pppd"), 'button[type="submit"]:text-matches("^(?:登入|Log in)$", "i")', "#verified"),
     "taishin": LoginForm(('input[placeholder="身分證字號"]', 'input[placeholder="使用者代號"]', 'input[placeholder="使用者密碼"]'), "#loginBtn", 'input[placeholder="驗證碼"]'),
     "sinopac": LoginForm((None, None, None), "#MMA_Login", 'input[id$="sino_keyword3"]', 'input[id^="ctl00_ctl00_ContentPlaceHolder1_DefaultContent_MMA"]'),
 }
@@ -82,6 +82,15 @@ def is_logout_href(href):
 
 
 def has_logged_in(page, is_official, *, bank=None):
+    try:
+        return _has_logged_in(page, is_official, bank=bank)
+    except PlaywrightError as error:
+        if not is_frame_transition_error(error):
+            raise
+        return False
+
+
+def _has_logged_in(page, is_official, *, bank=None):
     if not is_official(page.url):
         return False
     for frame in page.frames:
@@ -110,7 +119,22 @@ def has_logged_in(page, is_official, *, bank=None):
     return False
 
 
+def is_frame_transition_error(error):
+    return any(message in str(error).lower() for message in (
+        "frame was detached", "frame has been detached", "execution context was destroyed",
+        "cannot find context with specified id"))
+
+
 def check_login_error(page, is_official):
+    try:
+        return _check_login_error(page, is_official)
+    except PlaywrightError as error:
+        if not is_frame_transition_error(error):
+            raise
+        # A replaced iframe will be checked in the next read-only poll.
+
+
+def _check_login_error(page, is_official):
     for frame in page.frames:
         if not is_official(frame.url):
             continue

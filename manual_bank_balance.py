@@ -10,7 +10,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from bank_registry import AUTO_BANKS
 from chrome_session import system_chrome_context
 from bank_diagnostics import diagnostic_chrome_context, has_verification_challenge
-from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog
+from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog, is_frame_transition_error
 from bank_captcha import CAPTCHA_IMAGES
 from ctbc_balance import parse_balance_text
 
@@ -431,6 +431,15 @@ def read_skbank_twd_balance(page):
 
 
 def click_chb_navigation(page, visited):
+    try:
+        return _click_chb_navigation(page, visited)
+    except PlaywrightError as error:
+        if not is_frame_transition_error(error):
+            raise
+        return False
+
+
+def _click_chb_navigation(page, visited):
     for frame in page.frames:
         if not is_bank_url(page.url, "chb") or not is_bank_url(frame.url, "chb"):
             continue

@@ -14,6 +14,33 @@ def default_credentials(monkeypatch):
         monkeypatch.delenv("ESUN_BANK_" + key, raising=False)
 
 
+@pytest.mark.parametrize("message,transient", [
+    ("Frame was detached", True),
+    ("Execution context was destroyed, most likely because of a navigation", True),
+    ("Target page, context or browser has been closed", False),
+    ("Timeout 1000ms exceeded", False),
+])
+def test_bank_polling_tolerates_only_replaced_frames(message, transient):
+    from playwright.sync_api import Error
+    from manual_bank_balance import click_chb_navigation
+    error = Error(message)
+    def count():
+        raise error
+    frame = SimpleNamespace(url="https://www.chb.com.tw/", locator=lambda css:
+                            SimpleNamespace(count=count), get_by_text=lambda *a, **kw:
+                            SimpleNamespace(count=count))
+    page = SimpleNamespace(url=frame.url, frames=[frame])
+    for call in (lambda: bank_login.check_login_error(page, lambda url: True),
+                 lambda: click_chb_navigation(page, set()),
+                 lambda: bank_login.has_logged_in(page, lambda url: True)):
+        if transient:
+            assert call() in (None, False)
+        else:
+            with pytest.raises(Error) as caught:
+                call()
+            assert caught.value is error
+
+
 def test_hncb_login_help_link_is_not_a_logout_control():
     assert not is_logout_href("http://www.hncb.com.tw/ibankqa/LoginLogout.shtml")
     assert is_logout_href("/netbank/logout")

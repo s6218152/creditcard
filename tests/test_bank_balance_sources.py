@@ -57,6 +57,20 @@ def test_dbs_credit_card_only_page_is_not_a_deposit_balance(page):
         read_dbs_twd_balance(page)
 
 
+@pytest.mark.parametrize("label", ["登入", "Log in"])
+def test_shanghai_login_form_accepts_official_chinese_and_english_buttons(page, label):
+    from bank_login import locate_form
+    from manual_bank_balance import is_bank_url
+    load_mock_page(page, "https://ebank.scsb.com.tw/", f'''
+        <input id="userId"><input id="idNumber"><input id="pppd" type="password">
+        <input id="verified" maxlength="5">
+        <button type="submit">{label}</button><button type="button">Apply immediately</button>
+    ''')
+    _, fields, submit = locate_form(page, "shanghai", lambda u: is_bank_url(u, "shanghai"))
+    assert len(fields) == 3 and submit.count() == 1
+    assert submit.inner_text() == label
+
+
 @pytest.mark.parametrize("timer,expected", [(True, True), (False, False)])
 def test_esun_new_dashboard_recognizes_session_without_visible_logout(page, timer, expected):
     from bank_login import has_logged_in
