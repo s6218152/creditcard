@@ -93,6 +93,8 @@ def main():
     for balance in report.get("balances", []):
         if balance.get("error_code") == "verification_required":
             header += f"{balance['bank_name']}：需要人工驗證（可能為 OTP），本次未取得餘額。\n"
+        elif str(balance.get("error_code", "")).startswith("captcha_"):
+            header += f"{balance['bank_name']}：圖形驗證碼流程未完成，本次未取得餘額；這不是已確認的 OTP 要求。\n"
         elif balance.get("error_code") == "login_unconfirmed" or (
                 balance.get("status") == "error" and "驗證" in balance.get("error_message", "")):
             header += f"{balance['bank_name']}：登入／驗證未完成；無法確認是否為 OTP。\n"

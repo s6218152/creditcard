@@ -75,3 +75,20 @@ def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     monkeypatch.setattr(page, "wait_for_function", bounded_wait)
     assert login_from_environment(page)
     assert page.evaluate("window.loginClicks") == 1
+
+
+def test_ctbc_validation_diagnostics_never_include_credentials(page):
+    import json
+    from bank_diagnostics import collect_page_diagnostics
+    from ctbc_balance import LOGIN_URL, is_ctbc_url
+    load_mock_page(page, LOGIN_URL, """
+        <input formcontrolname="custIxd" class="ng-invalid" value="private-identity">
+        <input formcontrolname="userIxd" value="private-user">
+        <input formcontrolname="pxd" type="password" value="private-password">
+        <button disabled>登入</button>
+    """)
+    diagnostic = collect_page_diagnostics(page, "ctbc", is_ctbc_url)
+    frame = diagnostic["frames"][0]
+    assert frame["credential_validation"][0]["invalid"] is True
+    assert frame["login_buttons"] == [{"disabled": True, "visible": True}]
+    assert "private-" not in json.dumps(diagnostic)

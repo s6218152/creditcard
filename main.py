@@ -247,6 +247,8 @@ def print_statement_summaries(summaries: list, balances: list) -> set:
                 print("存款餘額: 已跳過（銀行維修中）")
             elif balance.get("error_code") == "verification_required":
                 print("存款餘額: 待完成網銀驗證")
+            elif balance.get("error_code") == "captcha_recognition_failed":
+                print("存款餘額: 圖形驗證碼無法確認，需人工處理（本次未送出登入）")
             elif balance.get("error_code") == "credentials_rejected":
                 print("存款餘額: 登入資料不符，請更新該銀行設定")
             elif balance.get("error_code") == "login_unconfirmed":

@@ -283,3 +283,12 @@ def test_unrecognized_payment_amount_is_not_reported_as_zero(capsys):
     output = capsys.readouterr().out
     assert "本期應繳總金額: 未辨識（需人工確認）" in output
     assert "NT$ 0" not in output
+
+
+def test_image_captcha_failure_is_reported_as_graphical_verification(capsys):
+    from main import print_statement_summaries
+    print_statement_summaries([("第一銀行", {"metadata": {"status": "success"},
+        "total_amount": 10, "total_amount_found": True, "due_date": "2026/10/15"})],
+        [{"bank": "first_bank", "bank_name": "第一銀行", "status": "error",
+          "error_code": "captcha_recognition_failed"}])
+    assert "圖形驗證碼無法確認，需人工處理" in capsys.readouterr().out

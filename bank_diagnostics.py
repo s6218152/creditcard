@@ -53,6 +53,13 @@ def collect_page_diagnostics(page, bank, is_official):
                 item["login_fields"] = [frame.locator(f'input[formcontrolname="{name}"]:visible').count()
                                         for name in ("custIxd", "userIxd", "pxd")]
                 item["visible_input_count"] = frame.locator("input:visible").count()
+                item["credential_validation"] = frame.locator(
+                    'input[formcontrolname="custIxd"]:visible, '
+                    'input[formcontrolname="userIxd"]:visible, '
+                    'input[formcontrolname="pxd"]:visible').evaluate_all(
+                    'es=>es.map(e=>({disabled:e.disabled,readonly:e.readOnly,invalid:e.classList.contains("ng-invalid")}))')
+                item["login_buttons"] = frame.get_by_role("button", name="登入", exact=True).evaluate_all(
+                    'es=>es.map(e=>({disabled:e.disabled,visible:!!e.getClientRects().length}))')
             result["frames"].append(item)
         except Exception:
             result["frames"].append({"state": "page_unavailable"})
