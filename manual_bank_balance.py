@@ -553,6 +553,21 @@ def click_balance_navigation(page, bank, visited):
 
 
 def prepare_entry(page, bank):
+    if bank == "shanghai" and is_bank_url(page.url, bank):
+        page.locator(LOGIN_FORMS[bank].submit + ":visible").wait_for(timeout=20_000)
+        if not is_bank_url(page.url, bank):
+            raise BankQueryError("上海登入頁已離開官方網址，未送出帳密", "untrusted_url")
+        if page.locator('button[type="submit"]:text-is("Log in"):visible').count() == 1:
+            language = page.get_by_role("button", name="EN", exact=True)
+            if language.count() != 1:
+                raise BankQueryError("上海登入語言選單不唯一，未送出帳密", "login_language_unavailable")
+            language.click(timeout=5000)
+            chinese = page.locator('a[data-lang-locale="zh-TW"]:visible')
+            if chinese.count() != 1:
+                raise BankQueryError("上海繁中語言選項不唯一，未送出帳密", "login_language_unavailable")
+            chinese.click(timeout=5000)
+            page.locator('button[type="submit"]:text-is("登入"):visible').wait_for(timeout=10_000)
+        return
     if bank == "ubot" and is_bank_url(page.url, bank):
         # The homepage includes an off-screen form. Opening the drawer also
         # requests its CAPTCHA; filling that hidden form leaves the image blank.

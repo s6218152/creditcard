@@ -71,6 +71,21 @@ def test_shanghai_login_form_accepts_official_chinese_and_english_buttons(page, 
     assert submit.inner_text() == label
 
 
+@pytest.mark.parametrize("label", ["登入", "Log in"])
+def test_shanghai_uses_official_traditional_chinese_choice_before_login(page, label):
+    from manual_bank_balance import prepare_entry
+    load_mock_page(page, "https://ebank.scsb.com.tw/", f'''
+        <button type="button" onclick="document.getElementById('choice').style.display='block'">EN</button>
+        <a id="choice" data-lang-locale="zh-TW" style="display:none" onclick="
+          document.getElementById('submit').innerText='登入';this.style.display='none'">繁中</a>
+        <a data-lang-locale="zh-TW" style="display:none">繁體中文</a>
+        <input id="userId"><input id="idNumber"><input id="pppd">
+        <button id="submit" type="submit">{label}</button>
+    ''')
+    prepare_entry(page, "shanghai")
+    assert page.locator('#submit').inner_text() == "登入"
+
+
 @pytest.mark.parametrize("timer,expected", [(True, True), (False, False)])
 def test_esun_new_dashboard_recognizes_session_without_visible_logout(page, timer, expected):
     from bank_login import has_logged_in
