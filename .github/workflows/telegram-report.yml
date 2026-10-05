@@ -1,0 +1,33 @@
+name: Monthly Telegram report
+on:
+  schedule:
+    # UTC 04:00 = Asia/Taipei 12:00; execution and delivery may be delayed.
+    - cron: '0 4 1,15 * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: telegram-report
+  cancel-in-progress: false
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr xvfb
+          python -m pip install -r requirements.txt
+      - name: Run pipeline and deliver report
+        env:
+          TZ: Asia/Taipei
+          PYTHONUNBUFFERED: '1'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPORT_ENV: ${{ secrets.REPORT_ENV }}
+        run: xvfb-run -a python telegram_report.py
