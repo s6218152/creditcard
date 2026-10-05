@@ -38,3 +38,16 @@ def test_cancellation_preserves_prior_results(monkeypatch, capsys):
     monkeypatch.setattr(sinopac_balance, "query_balance", cancel)
     assert not run_queries({"balance_query": {"ctbc": {"enabled": True}, "sinopac": {"enabled": True}}})
     assert "中國信託臺幣存款餘額：NT$ 100.00" in capsys.readouterr().out
+
+
+def test_visible_otp_input_is_reported_even_after_browser_timeout(monkeypatch):
+    from bank_login import BankQueryError
+    def fail(selector):
+        error = BankQueryError("頁面操作逾時", "browser_action_failed")
+        error.diagnostics = [{"verification_input_visible": True, "frames": []}]
+        raise error
+    monkeypatch.setattr(ctbc_balance, "query_balance", fail)
+    rows = []
+    assert not run_queries({"balance_query": {"ctbc": {"enabled": True}}}, on_result=rows.append)
+    assert rows[0]["error_code"] == "verification_required"
+    assert rows[0]["diagnostics"][0]["verification_input_visible"] is True
