@@ -7,6 +7,19 @@ import pytest
 from bank_diagnostics import collect_page_diagnostics, diagnostic_chrome_context, has_verification_challenge
 
 
+def test_private_failure_text_masks_credentials_and_skips_foreign_frames(monkeypatch):
+    from bank_diagnostics import collect_private_page_diagnostics
+    monkeypatch.setenv("BANK_PASSWORD", "private-password")
+    def forbidden(selector):
+        raise AssertionError("foreign page must not be read")
+    frame = SimpleNamespace(url="https://bank.example/", locator=lambda css:
+                            SimpleNamespace(inner_text=lambda **kwargs: "公告 private-password"))
+    foreign = SimpleNamespace(url="https://evil.example/", locator=forbidden)
+    result = collect_private_page_diagnostics(SimpleNamespace(url=frame.url, frames=[frame, foreign]),
+                                             lambda url: url.startswith("https://bank.example/"))
+    assert result == [{"host": "bank.example", "visible_text": "公告 [已隱藏]"}]
+
+
 def test_foreign_frames_are_never_inspected_for_verification():
     def forbidden(*args):
         raise AssertionError("foreign frame must not be read")

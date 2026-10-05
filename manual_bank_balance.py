@@ -733,4 +733,5 @@ def query_balance(bank, balance_selector=None, *, verification_timeout=120):
         # Keep credentials out of terminal output and persisted reports.
         sanitized = BankQueryError("網銀頁面操作逾時或已關閉；未取得餘額，不會重送登入", "browser_action_failed")
         sanitized.diagnostics = getattr(error, "diagnostics", [])
+        sanitized.private_diagnostics = getattr(error, "private_diagnostics", [])
         raise sanitized from error

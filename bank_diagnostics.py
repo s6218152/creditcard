@@ -3,9 +3,33 @@ from contextlib import contextmanager
 from pathlib import Path
 import traceback
 import re
+import os
 from urllib.parse import urlparse
 
 from chrome_session import system_chrome_context
+
+
+def collect_private_page_diagnostics(page, is_official):
+    """Failure-only visible text for the user's private ZIP, never CI logs."""
+    result = []
+    if not is_official(page.url):
+        return result
+    secrets = [value for key, value in os.environ.items() if value and
+               any(word in key.upper() for word in
+                   ("PASSWORD", "TOKEN", "SECRET", "_ID", "BIRTHDAY", "EMAIL"))]
+    for frame in page.frames:
+        if not is_official(frame.url):
+            continue
+        try:
+            # inner_text does not collect form input values or HTML attributes.
+            text = frame.locator("body").inner_text(timeout=1500)
+            for value in sorted(secrets, key=len, reverse=True):
+                text = text.replace(value, "[已隱藏]")
+            result.append({"host": urlparse(frame.url).hostname,
+                           "visible_text": text[:8000]})
+        except Exception:
+            continue
+    return result
 
 
 def has_verification_challenge(page, is_official):
@@ -73,6 +97,9 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
         try:
             yield context
         except Exception as error:
+            error.private_diagnostics = [item for page in getattr(context, "pages", [])
+                                         if not page.is_closed()
+                                         for item in collect_private_page_diagnostics(page, is_official)]
             error.diagnostics = [collect_page_diagnostics(page, bank, is_official)
                                  for page in getattr(context, "pages", []) if not page.is_closed()]
             cause = error.__cause__ or error

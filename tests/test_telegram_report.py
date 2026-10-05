@@ -43,7 +43,7 @@ def test_send_document_includes_chat_and_file(monkeypatch):
     assert content_type.startswith("multipart/form-data;")
 
 
-def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path):
+def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path, capsys):
     import io
     import zipfile
     from types import SimpleNamespace
@@ -61,7 +61,8 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
         "files": ["statement.json"], "balances": [{"bank_name": "測試銀行",
         "status": "error", "error_code": "verification_required"},
         {"bank_name": "上海商銀", "status": "error", "error_code": "login_form_unavailable",
-         "error_message": "未找到已驗證的個人網銀登入表單，未送出帳密"}]}))
+         "error_message": "未找到已驗證的個人網銀登入表單，未送出帳密",
+         "private_diagnostics": [{"visible_text": "private-bank-notice"}]}]}))
     (output / "statement.json").write_text('{"details": [{"amount": 500}]}')
 
     def run(*args, **kwargs):
@@ -74,13 +75,16 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     monkeypatch.setattr(report, "request_telegram", lambda *args: messages.append(json.loads(args[2])))
     monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
     assert report.main() == 1
+    assert "private-bank-notice" not in capsys.readouterr().out
     assert "需要人工驗證" in messages[0]["text"]
     assert "上海商銀：登入／驗證未完成" not in messages[0]["text"]
     assert "未找到已驗證的個人網銀登入表單" in messages[0]["text"]
     assert "本次僅測試銀行餘額：chb、esun" in messages[0]["text"]
     assert "private-password" not in messages[0]["text"]
     assert "fontTools" not in messages[0]["text"]
+    assert "private-bank-notice" not in messages[0]["text"]
     with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
         assert set(archive.namelist()) == {"console.txt", "latest.json", "statement.json"}
         assert json.loads(archive.read("statement.json"))["details"][0]["amount"] == 500
         assert b"fontTools is required" in archive.read("console.txt")
+        assert b"private-bank-notice" in archive.read("latest.json")

@@ -73,6 +73,7 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
                 on_result({"bank": key, "bank_name": name, "status": "error", "balance": None,
                            "error_message": str(error), "error_code": error_code,
                            "diagnostics": diagnostics,
+                           "private_diagnostics": getattr(error, "private_diagnostics", []),
                            "queried_at": datetime.now().astimezone().isoformat(timespec="seconds")})
     if results and show_summary and show_results:
         print("\n=== 本次餘額查詢結果 ===")
