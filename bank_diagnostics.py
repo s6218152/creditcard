@@ -59,7 +59,7 @@ def collect_page_diagnostics(page, bank, is_official):
                     'input[formcontrolname="pxd"]:visible').evaluate_all(
                     'es=>es.map(e=>({disabled:e.disabled,readonly:e.readOnly,invalid:e.classList.contains("ng-invalid")}))')
                 item["login_buttons"] = frame.get_by_role("button", name="登入", exact=True).evaluate_all(
-                    'es=>es.map(e=>({disabled:e.disabled,visible:!!e.getClientRects().length}))')
+                    'es=>es.map(e=>({tag:e.tagName,disabled:!!e.disabled,aria_disabled:e.getAttribute("aria-disabled"),pointer_events:getComputedStyle(e).pointerEvents,visible:!!e.getClientRects().length}))')
             result["frames"].append(item)
         except Exception:
             result["frames"].append({"state": "page_unavailable"})
@@ -84,4 +84,16 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
             navigation = getattr(cause, "navigation_state", None)
             if navigation:
                 error.diagnostics.append({"navigation": navigation})
+            # Extract only fixed failure categories, never Playwright's raw
+            # action log (which may contain fill arguments or DOM values).
+            message = str(cause).lower()
+            reasons = {"intercepts pointer events": "pointer_intercepted",
+                       "outside of the viewport": "outside_viewport",
+                       "element is not enabled": "disabled",
+                       "element is not visible": "not_visible",
+                       "element is not stable": "not_stable",
+                       "strict mode violation": "multiple_matches"}
+            interactions = [label for phrase, label in reasons.items() if phrase in message]
+            if interactions:
+                error.diagnostics.append({"interaction_reasons": interactions})
             raise

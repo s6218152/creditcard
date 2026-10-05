@@ -90,5 +90,6 @@ def test_ctbc_validation_diagnostics_never_include_credentials(page):
     diagnostic = collect_page_diagnostics(page, "ctbc", is_ctbc_url)
     frame = diagnostic["frames"][0]
     assert frame["credential_validation"][0]["invalid"] is True
-    assert frame["login_buttons"] == [{"disabled": True, "visible": True}]
+    assert frame["login_buttons"][0]["disabled"] is True
+    assert frame["login_buttons"][0]["visible"] is True
     assert "private-" not in json.dumps(diagnostic)
