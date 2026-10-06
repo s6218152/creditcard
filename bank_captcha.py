@@ -219,10 +219,32 @@ def recognize_numeric_captcha(image, length, alphabet="digits"):
 
 
 def _image_bytes(images, spec):
+    if spec.background and spec.natural_image:
+        for index in range(spec.tiles):
+            # Shanghai initially shows a placeholder, then sets the real image
+            # as a data URI. Read that image, not a pending CSS repaint.
+            images.nth(index).evaluate(r"""async e => {
+                const ready = () => /data:image\/(?:png|jpeg|gif);base64,/.test(e.getAttribute('style') || '');
+                if (ready()) return;
+                await new Promise((resolve, reject) => {
+                    const observer = new MutationObserver(() => {
+                        if (ready()) { clearTimeout(timer); observer.disconnect(); resolve(); }
+                    });
+                    const timer = setTimeout(() => {
+                        observer.disconnect(); reject(Error('captcha background load timeout'));
+                    }, 5000);
+                    observer.observe(e, {attributes: true, attributeFilter: ['style']});
+                });
+            }""")
     sources = tuple(images.nth(i).get_attribute("style" if spec.background else "src") or ""
                     for i in range(spec.tiles))
     pictures = []
     for i, source in enumerate(sources):
+        if spec.background and spec.natural_image:
+            encoded = re.search(r"data:image/(?:png|jpeg|gif);base64,[A-Za-z0-9+/=]+", source)
+            if not encoded:
+                raise ValueError("captcha background image unavailable")
+            source = encoded.group(0)
         if not spec.rendered_image and re.match(r"^data:image/(?:png|jpeg|gif);base64,", source):
             if len(source) > 700_000:
                 raise ValueError("challenge too large")

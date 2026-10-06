@@ -54,6 +54,9 @@ def test_visible_otp_input_is_reported_even_after_browser_timeout(monkeypatch):
 
 
 def test_private_diagnostics_use_separate_callback(monkeypatch):
+    import bank_balances
+    from datetime import datetime
+    from types import SimpleNamespace
     from bank_login import BankQueryError
     def fail(selector):
         error = BankQueryError("頁面操作失敗", "browser_action_failed")
@@ -61,7 +64,12 @@ def test_private_diagnostics_use_separate_callback(monkeypatch):
         raise error
     monkeypatch.setattr(ctbc_balance, "query_balance", fail)
     rows, private = [], []
+    # Saving the private file can cross a second boundary. Both records must
+    # still identify the same query so the ZIP can match them reliably.
+    monkeypatch.setattr(bank_balances, "datetime", SimpleNamespace(now=lambda:
+        datetime.fromisoformat("2026-10-06T19:11:01+08:00" if private else "2026-10-06T19:11:00+08:00")))
     assert not run_queries({"balance_query": {"ctbc": {"enabled": True}}},
                            on_result=rows.append, on_private_diagnostics=private.append)
     assert "private_diagnostics" not in rows[0]
     assert private[0]["private_diagnostics"][0]["visible_text"] == "private-bank-notice"
+    assert rows[0]["queried_at"] == private[0]["queried_at"]

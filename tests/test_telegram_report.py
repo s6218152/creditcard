@@ -1,4 +1,5 @@
 import json
+import pytest
 
 import telegram_report as report
 
@@ -51,7 +52,8 @@ def test_send_document_includes_chat_and_file(monkeypatch):
     assert content_type.startswith("multipart/form-data;")
 
 
-def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path, capsys):
+@pytest.mark.parametrize("current_diagnostics", [True, False])
+def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path, capsys, current_diagnostics):
     import io
     import zipfile
     from types import SimpleNamespace
@@ -68,10 +70,14 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     (output / "latest.json").write_text(json.dumps({
         "files": ["statement.json"], "balances": [{"bank_name": "測試銀行",
         "status": "error", "error_code": "verification_required"},
-        {"bank_name": "上海商銀", "status": "error", "error_code": "login_form_unavailable",
+        {"bank": "shanghai", "queried_at": "2026-10-06T19:11:00+08:00",
+         "bank_name": "上海商銀", "status": "error", "error_code": "login_form_unavailable",
          "error_message": "未找到已驗證的個人網銀登入表單，未送出帳密",
          "private_diagnostics": [{"visible_text": "private-bank-notice"}]}]}))
     (output / "statement.json").write_text('{"details": [{"amount": 500}]}')
+    (output / "private_bank_diagnostics.json").write_text(json.dumps({"schema_version": 1, "banks": [{
+        "bank": "shanghai", "queried_at": "2026-10-06T19:11:00+08:00" if current_diagnostics else "2026-10-05T19:11:00+08:00",
+        "private_diagnostics": [{"visible_text": "private-bank-notice private-password"}]}]}))
 
     def run(*args, **kwargs):
         assert args[0] == [report.sys.executable, "main.py", "--bank", "chb", "--bank", "esun"]
@@ -92,7 +98,13 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     assert "fontTools" not in messages[0]["text"]
     assert "private-bank-notice" not in messages[0]["text"]
     with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
-        assert set(archive.namelist()) == {"console.txt", "latest.json", "statement.json"}
+        expected = {"console.txt", "latest.json", "statement.json"}
+        if current_diagnostics:
+            expected.add("private_bank_diagnostics.json")
+            private = archive.read("private_bank_diagnostics.json")
+            assert b"private-bank-notice" in private
+            assert b"private-password" not in private
+        assert set(archive.namelist()) == expected
         assert json.loads(archive.read("statement.json"))["details"][0]["amount"] == 500
         assert b"fontTools is required" in archive.read("console.txt")
         assert b"private-bank-notice" not in archive.read("latest.json")

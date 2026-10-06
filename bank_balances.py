@@ -75,18 +75,19 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None,
                 print(f"[{name}頁面診斷] {json.dumps(diagnostics, ensure_ascii=False)}")
             succeeded = False
             private_diagnostics = getattr(error, "private_diagnostics", [])
+            queried_at = datetime.now().astimezone().isoformat(timespec="seconds")
             if private_diagnostics and on_private_diagnostics:
                 on_private_diagnostics({
                     "bank": key,
                     "bank_name": name,
-                    "queried_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "queried_at": queried_at,
                     "private_diagnostics": private_diagnostics,
                 })
             if on_result:
                 on_result({"bank": key, "bank_name": name, "status": "error", "balance": None,
                            "error_message": str(error), "error_code": error_code,
                            "diagnostics": diagnostics,
-                           "queried_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                           "queried_at": queried_at,
                            "duration_seconds": round(time.monotonic() - started_at, 3)})
     if results and show_summary and show_results:
         print("\n=== 本次餘額查詢結果 ===")

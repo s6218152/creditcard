@@ -141,6 +141,16 @@ def main():
         bundle.writestr("console.txt", output)
         if latest.exists():
             bundle.writestr("latest.json", redact(json.dumps(report, ensure_ascii=False, indent=2)))
+        private_path = output_dir / "private_bank_diagnostics.json"
+        if private_path.exists():
+            private_report = json.loads(private_path.read_text())
+            current = {(row.get("bank"), row.get("queried_at"))
+                       for row in report.get("balances", []) if row.get("bank") and row.get("queried_at")}
+            private_rows = [row for row in private_report.get("banks", [])
+                            if (row.get("bank"), row.get("queried_at")) in current]
+            if private_rows:
+                bundle.writestr(private_path.name, redact(json.dumps(
+                    {"schema_version": 1, "banks": private_rows}, ensure_ascii=False, indent=2)))
         for name in report.get("files", []):
             path = output_dir / Path(name).name
             if path.exists():

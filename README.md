@@ -20,7 +20,7 @@ ruff check .
 
 `config.yaml` 預設只接受 `mail.local_filters.trusted_sender_domains` 中的銀行寄件網域，並拒絕無法對應銀行規則的 PDF。銀行若更換寄件服務，請先確認完整寄件地址，再新增其網域；不要關閉寄件者驗證作為長期解法。
 
-下載的 PDF、解析 JSON 與郵件歷史預設保留 730 天，由 `storage.retention_days` 調整；設為 `0` 可停用自動清理。失敗頁面的可見文字只寫入本機 `output/private_bank_diagnostics.json`，不會放進 `latest.json` 或 Telegram 附件，且會遮罩常見身分證、電子郵件、帳號與幣別金額格式。
+下載的 PDF、解析 JSON 與郵件歷史預設保留 730 天，由 `storage.retention_days` 調整；設為 `0` 可停用自動清理。失敗頁面的可見文字寫入 `output/private_bank_diagnostics.json`，並將與本次查詢相符的紀錄收錄至 Telegram 的私人 ZIP 附件，方便除錯；不會放進 `latest.json`、Telegram 文字訊息或公開執行紀錄，且會遮罩常見身分證、電子郵件、帳號與幣別金額格式。
 
 下載與解析信用卡帳單：
 
