@@ -9,8 +9,21 @@ from urllib.parse import urlparse
 from chrome_session import system_chrome_context
 
 
+def redact_private_text(text: str, secrets=()) -> str:
+    for value in sorted({value for value in secrets if value}, key=len, reverse=True):
+        text = text.replace(value, "[已隱藏]")
+    text = re.sub(r"(?i)\b[A-Z][12]\d{8}\b", "[身分識別碼已隱藏]", text)
+    text = re.sub(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", "[電子郵件已隱藏]", text)
+    text = re.sub(r"(?<!\w)(?:\d[\s-]?){7,16}(?!\w)", "[帳號已隱藏]", text)
+    text = re.sub(r"(?i)(?:NT\$|NTD|TWD|新?[臺台]幣)\s*[+-]?[\d,]+(?:\.\d{1,2})?",
+                  "[金額已隱藏]", text)
+    text = re.sub(r"(?<!\w)[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}(?!\w)",
+                  "[金額已隱藏]", text)
+    return text
+
+
 def collect_private_page_diagnostics(page, is_official):
-    """Failure-only visible text for the user's private ZIP, never CI logs."""
+    """Failure-only visible text for the local private diagnostic file."""
     result = []
     if not is_official(page.url):
         return result
@@ -23,8 +36,7 @@ def collect_private_page_diagnostics(page, is_official):
         try:
             # inner_text does not collect form input values or HTML attributes.
             text = frame.locator("body").inner_text(timeout=1500)
-            for value in sorted(secrets, key=len, reverse=True):
-                text = text.replace(value, "[已隱藏]")
+            text = redact_private_text(text, secrets)
             result.append({"host": urlparse(frame.url).hostname,
                            "visible_text": text[:8000]})
         except Exception:

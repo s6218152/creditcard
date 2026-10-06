@@ -2,6 +2,8 @@
 
 from urllib.parse import urlparse
 from decimal import Decimal
+from dataclasses import dataclass
+from collections.abc import Callable
 import re
 import time
 
@@ -15,6 +17,13 @@ from bank_captcha import CAPTCHA_IMAGES
 from ctbc_balance import parse_balance_text
 
 BALANCE_LABELS = ("帳戶餘額", "存款餘額", "帳面餘額", "目前餘額", "Account Balance", "Current Balance")
+
+
+@dataclass(frozen=True)
+class BankAdapter:
+    reader: Callable[..., object] | None = None
+    navigate: Callable[..., bool] | None = None
+    allow_generic_navigation: bool = True
 
 
 def is_bank_url(url, bank):
@@ -209,30 +218,9 @@ def read_chb_current_balance(page):
 def read_automatic_balance(page, bank, selector=None):
     if selector:
         return BankBalance(read_balance_from_page(page, bank, selector))
-    if bank == "esun":
-        return read_esun_twd_balance(page)
-    if bank == "cathay":
-        return read_cathay_twd_balance(page)
-    if bank == "chb":
-        return read_chb_current_balance(page)
-    if bank == "sinopac":
-        return read_sinopac_twd_balance(page)
-    if bank == "fubon":
-        return read_fubon_twd_balance(page)
-    if bank == "shanghai":
-        return read_shanghai_twd_balance(page)
-    if bank == "feib":
-        return read_feib_twd_balance(page)
-    if bank == "first_bank":
-        return read_first_twd_balance(page)
-    if bank == "taishin":
-        return read_taishin_twd_balance(page)
-    if bank == "skbank":
-        return read_skbank_twd_balance(page)
-    if bank == "hncb":
-        return read_hncb_twd_balance(page)
-    if bank == "dbs":
-        return read_dbs_twd_balance(page)
+    adapter = BANK_ADAPTERS.get(bank)
+    if adapter and adapter.reader:
+        return adapter.reader(page)
     texts = []
     for frame in page.frames:
         if is_bank_url(frame.url, bank):
@@ -486,25 +474,31 @@ def _click_chb_navigation(page, visited):
     return False
 
 
-def click_balance_navigation(page, bank, visited):
-    if bank == "skbank" and is_bank_url(page.url, bank):
+def _navigate_skbank(page, visited):
+    if is_bank_url(page.url, "skbank"):
         entry = page.locator('a.iMenu__pib[href="zh-TW/AccountQuery/QueryAcctSummary/"]:visible')
         if "skbank_accounts" not in visited and entry.count() == 1:
             visited.add("skbank_accounts")
             entry.click(timeout=5000)
             return True
-        return False
-    if bank == "first_bank" and is_bank_url(page.url, bank):
+    return False
+
+
+def _navigate_first_bank(page, visited):
+    if is_bank_url(page.url, "first_bank"):
         for frame in page.frames:
-            if not is_bank_url(frame.url, bank) or not urlparse(frame.url).path.endswith("/1/acntReviewAll.html"):
+            if not is_bank_url(frame.url, "first_bank") or not urlparse(frame.url).path.endswith("/1/acntReviewAll.html"):
                 continue
             button = frame.locator("#m-sum:visible")
             if "first_twd_total" not in visited and button.count() == 1:
                 visited.add("first_twd_total")
                 button.click(timeout=5000)
                 return True
-        return False
-    if bank == "shanghai" and is_bank_url(page.url, bank):
+    return False
+
+
+def _navigate_shanghai(page, visited):
+    if is_bank_url(page.url, "shanghai"):
         for label in ("臺幣存匯", "臺幣帳戶查詢", "所有帳戶查詢"):
             if label in visited:
                 continue
@@ -513,8 +507,11 @@ def click_balance_navigation(page, bank, visited):
                 visited.add(label)
                 entry.click(timeout=5000)
                 return True
-        return False
-    if bank == "ubot" and is_bank_url(page.url, bank):
+    return False
+
+
+def _navigate_ubot(page, visited):
+    if is_bank_url(page.url, "ubot"):
         if "ubot_menu" not in visited:
             menu = page.locator('a.btn.dropdown-toggle:text-is("帳戶查詢"):visible')
             if menu.count() == 1:
@@ -527,15 +524,43 @@ def click_balance_navigation(page, bank, visited):
                 entry.click(timeout=5000)
                 visited.add("ubot_balance")
                 return True
-        return False
-    if bank == "chb":
-        return click_chb_navigation(page, visited)
-    if bank == "cathay" and "cathay_twd_overview" not in visited and is_bank_url(page.url, bank):
+    return False
+
+
+def _navigate_cathay(page, visited):
+    if "cathay_twd_overview" not in visited and is_bank_url(page.url, "cathay"):
         overview = page.locator('button[data-evt="home_twd_overview"]:visible')
         if overview.count() == 1:
             visited.add("cathay_twd_overview")
             overview.click(timeout=5000)
             return True
+    return False
+
+
+BANK_ADAPTERS = {
+    "esun": BankAdapter(read_esun_twd_balance),
+    "cathay": BankAdapter(read_cathay_twd_balance, _navigate_cathay),
+    "chb": BankAdapter(read_chb_current_balance, click_chb_navigation, False),
+    "sinopac": BankAdapter(read_sinopac_twd_balance),
+    "fubon": BankAdapter(read_fubon_twd_balance),
+    "shanghai": BankAdapter(read_shanghai_twd_balance, _navigate_shanghai, False),
+    "feib": BankAdapter(read_feib_twd_balance),
+    "first_bank": BankAdapter(read_first_twd_balance, _navigate_first_bank, False),
+    "taishin": BankAdapter(read_taishin_twd_balance),
+    "skbank": BankAdapter(read_skbank_twd_balance, _navigate_skbank, False),
+    "hncb": BankAdapter(read_hncb_twd_balance),
+    "dbs": BankAdapter(read_dbs_twd_balance),
+    "ubot": BankAdapter(navigate=_navigate_ubot, allow_generic_navigation=False),
+}
+
+
+def click_balance_navigation(page, bank, visited):
+    adapter = BANK_ADAPTERS.get(bank)
+    if adapter and adapter.navigate:
+        if adapter.navigate(page, visited):
+            return True
+        if not adapter.allow_generic_navigation:
+            return False
     for label in NAVIGATION_LABELS:
         if label in visited:
             continue

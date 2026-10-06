@@ -95,4 +95,4 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
         assert set(archive.namelist()) == {"console.txt", "latest.json", "statement.json"}
         assert json.loads(archive.read("statement.json"))["details"][0]["amount"] == 500
         assert b"fontTools is required" in archive.read("console.txt")
-        assert b"private-bank-notice" in archive.read("latest.json")
+        assert b"private-bank-notice" not in archive.read("latest.json")

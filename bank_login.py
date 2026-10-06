@@ -1,6 +1,5 @@
 """Fill verified official bank forms and submit at most once per query."""
 
-from dataclasses import dataclass
 import os
 from pathlib import Path
 import re
@@ -8,37 +7,13 @@ import re
 from dotenv import load_dotenv
 from playwright.sync_api import Error as PlaywrightError
 from bank_captcha import CaptchaError, try_fill_captcha
+from bank_specs import LOGIN_FORMS
 
 
 class BankQueryError(ValueError):
     def __init__(self, message, code):
         super().__init__(message)
         self.code = code
-
-
-@dataclass(frozen=True)
-class LoginForm:
-    fields: tuple
-    submit: str | None
-    captcha: str | None = None
-    group: str | None = None
-
-
-LOGIN_FORMS = {
-    "fubon": LoginForm((None, None, None), 'input[id="form1:loginBtn"]', 'input[id="form1:userCaptcha"]', 'input[type="password"]'),
-    "skbank": LoginForm(("#nb_GeneralId", 'input[placeholder^="用戶代號"]', 'input[placeholder^="理財密碼"]'), 'a:text-is("一般用戶登入")', 'input[placeholder="輸入右圖文字"]'),
-    "first_bank": LoginForm(("#loginCustIdFake", "#usrIdInput", "#pwd"), "#captchaLoginArea", "#vrfyCode"),
-    "esun": LoginForm(('input[name="id"]', 'input[name="userName"]', 'input[name="pxssword"]'), 'button.btn-main-fill'),
-    "feib": LoginForm(("#cid0", "#uid0", "#pad0"), "#submitbtn", "#VERCODE0"),
-    "ubot": LoginForm(("#sid", "#nickname", "#password"), 'button:text-is("登入")', "#CAPTCHA"),
-    "dbs": LoginForm((None, "#username", "#password"), "#loginbutton"),
-    "chb": LoginForm(('input[name="uid_show"]', "#uuid", "#pwd"), "#pb-login", "#captcha"),
-    "cathay": LoginForm(("#CustID", "#UserIdKeyin", "#PasswordKeyin"), 'button:text-is("登入")'),
-    "hncb": LoginForm(("#USERIDTEXT", "#NICKNAME", "#password"), 'a:text-is("確定登入")', "#TrxCaptchaKey"),
-    "shanghai": LoginForm(("#userId", "#idNumber", "#pppd"), 'button[type="submit"]:text-matches("^(?:登入|Log in)$", "i")', "#verified"),
-    "taishin": LoginForm(('input[placeholder="身分證字號"]', 'input[placeholder="使用者代號"]', 'input[placeholder="使用者密碼"]'), "#loginBtn", 'input[placeholder="驗證碼"]'),
-    "sinopac": LoginForm((None, None, None), "#MMA_Login", 'input[id$="sino_keyword3"]', 'input[id^="ctl00_ctl00_ContentPlaceHolder1_DefaultContent_MMA"]'),
-}
 
 
 def bank_credentials(bank):

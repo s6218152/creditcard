@@ -6,6 +6,22 @@
 python -m pip install -r requirements.txt
 ```
 
+開發與測試環境另安裝：
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+ruff check .
+```
+
+銀行、登入表單、驗證碼與帳單辨識的共用資料集中在 `bank_specs.py`；新增銀行時應先擴充該 registry，再實作對應的 reader／adapter，避免在多個檔案重複維護名稱與網址。
+
+## 郵件信任與本機資料留存
+
+`config.yaml` 預設只接受 `mail.local_filters.trusted_sender_domains` 中的銀行寄件網域，並拒絕無法對應銀行規則的 PDF。銀行若更換寄件服務，請先確認完整寄件地址，再新增其網域；不要關閉寄件者驗證作為長期解法。
+
+下載的 PDF、解析 JSON 與郵件歷史預設保留 730 天，由 `storage.retention_days` 調整；設為 `0` 可停用自動清理。失敗頁面的可見文字只寫入本機 `output/private_bank_diagnostics.json`，不會放進 `latest.json` 或 Telegram 附件，且會遮罩常見身分證、電子郵件、帳號與幣別金額格式。
+
 下載與解析信用卡帳單：
 
 ```bash

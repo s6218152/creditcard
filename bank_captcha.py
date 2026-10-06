@@ -12,41 +12,9 @@ import subprocess
 import sys
 
 from playwright.sync_api import Error as PlaywrightError
+from bank_specs import CAPTCHA_IMAGES, CaptchaSpec
 
 
-# Only enable forms whose image, length and alphabet have been inspected.
-@dataclass(frozen=True)
-class CaptchaSpec:
-    image: str
-    length: int
-    refresh: str
-    alphabet: str = "digits"
-    tiles: int = 1
-    background: bool = False
-    check_maxlength: bool = True
-    tile_border: int = 0
-    tile_gap: int = 0
-    rendered_image: bool = False
-    consensus_fallback: bool = False
-    all_model_consensus: bool = False
-    natural_image: bool = False
-
-
-CAPTCHA_IMAGES = {
-    "chb": CaptchaSpec("img.cimg", 6, ".captcha a.btn-refresh"),
-    "sinopac": CaptchaSpec("#imgCode", 6, "#imgCode"),
-    "fubon": CaptchaSpec("#captchaImage", 6, "#regenCaptchaLink"),
-    "feib": CaptchaSpec('#vercode0area img[data-role="vercode"]', 6, '#vercode0area button[data-action="resetcode"]'),
-    "hncb": CaptchaSpec("#code_Cap", 4, 'a[onclick="chgCaptcha();"]', consensus_fallback=True),
-    "taishin": CaptchaSpec("img._field_item__verify-code", 6, "button.js-btn-refresh"),
-    "shanghai": CaptchaSpec(".ved_img", 5, "button.chg_link", background=True),
-    "first_bank": CaptchaSpec("#code_verify", 4, 'a[onclick*="chgImg"]', "alnum",
-                             consensus_fallback=True, all_model_consensus=True, natural_image=True),
-    "skbank": CaptchaSpec(".verify img", 4, "a.icon__login--refresh", "alnum", tiles=4,
-                          tile_border=2, tile_gap=8, consensus_fallback=True),
-    "ubot": CaptchaSpec('img[alt="CAPTCHA"]', 6,
-                        '#CAPTCHA + div > div:has(> svg[data-icon="rotate"])', check_maxlength=False),
-}
 MIN_CHARACTER_CONFIDENCE = 0.95
 MIN_INDEPENDENT_CONFIDENCE = 0.50
 

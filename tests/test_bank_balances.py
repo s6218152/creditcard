@@ -51,3 +51,17 @@ def test_visible_otp_input_is_reported_even_after_browser_timeout(monkeypatch):
     assert not run_queries({"balance_query": {"ctbc": {"enabled": True}}}, on_result=rows.append)
     assert rows[0]["error_code"] == "verification_required"
     assert rows[0]["diagnostics"][0]["verification_input_visible"] is True
+
+
+def test_private_diagnostics_use_separate_callback(monkeypatch):
+    from bank_login import BankQueryError
+    def fail(selector):
+        error = BankQueryError("頁面操作失敗", "browser_action_failed")
+        error.private_diagnostics = [{"visible_text": "private-bank-notice"}]
+        raise error
+    monkeypatch.setattr(ctbc_balance, "query_balance", fail)
+    rows, private = [], []
+    assert not run_queries({"balance_query": {"ctbc": {"enabled": True}}},
+                           on_result=rows.append, on_private_diagnostics=private.append)
+    assert "private_diagnostics" not in rows[0]
+    assert private[0]["private_diagnostics"][0]["visible_text"] == "private-bank-notice"

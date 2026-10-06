@@ -18,6 +18,7 @@ from email.utils import parsedate_to_datetime, parseaddr
 from statement_filter import latest_statement_flags
 from config_validation import validate_config
 from storage_utils import private_directory, private_file
+from bank_specs import BANK_SPECS
 
 FUBON_PDF_LINK = re.compile(
     r"https://fbmbill\.taipeifubon\.com\.tw/client/pdf/[0-9a-f]+",
@@ -48,6 +49,22 @@ def decode_mime_header(header_value):
         else:
             parts.append(str(text))
     return "".join(parts)
+
+def sender_is_trusted(sender, local_filters, subject=""):
+    if not local_filters.get("require_trusted_sender", False):
+        return True
+    sender_domain = parseaddr(sender or "")[1].rpartition("@")[2].casefold()
+    if not sender_domain:
+        return False
+    for bank, domains in local_filters.get("bank_sender_domains", {}).items():
+        if bank in (subject or "") or bank.removesuffix("銀行") in (subject or ""):
+            return any(sender_domain == domain.casefold()
+                       or sender_domain.endswith("." + domain.casefold()) for domain in domains)
+    return any(
+        sender_domain == domain.casefold() or sender_domain.endswith("." + domain.casefold())
+        for domain in local_filters.get("trusted_sender_domains", [])
+    )
+
 
 def matches_email_filter(subject, sender, local_filters):
     """
@@ -83,6 +100,8 @@ def matches_email_filter(subject, sender, local_filters):
 def is_excluded_email(subject, local_filters, sender=""):
     original_subject = subject or ""
     sender_domain = parseaddr(sender or "")[1].rpartition("@")[2].casefold()
+    if not sender_is_trusted(sender, local_filters, original_subject):
+        return True
     for bank, rule in local_filters.get("bank_subject_rules", {}).items():
         domains = rule.get("sender_domains", [])
         belongs_to_bank = (bank in original_subject or bank in (sender or "") or
@@ -160,6 +179,10 @@ class MailFetcher:
         
         # 載入下載歷史紀錄
         self.history = self.load_history()
+        removed = prune_history_records(
+            self.history, self.config["storage"].get("retention_days", 730))
+        if removed:
+            self.save_history()
         
     def load_history(self):
         if self.history_file.exists():
@@ -503,14 +526,37 @@ def should_save_attachment(filename: str, subject: str, sender: str, mail_config
         return False
 
     source_text = f"{subject} {sender}".casefold()
+    sender_domain = parseaddr(sender or "")[1].rpartition("@")[2].casefold()
     attachment_patterns = mail_config.get("bank_attachment_patterns", {})
 
     for bank_name, patterns in attachment_patterns.items():
         bank_key = bank_name.casefold()
-        if bank_key in source_text or bank_key.replace("銀行", "") in source_text:
+        bank_domains = next((spec.domains for spec in BANK_SPECS.values()
+                             if spec.name == bank_name), ())
+        domain_matches = any(sender_domain == domain or sender_domain.endswith("." + domain)
+                             for domain in bank_domains)
+        if bank_key in source_text or bank_key.replace("銀行", "") in source_text or domain_matches:
             return any(fnmatch.fnmatchcase(filename.casefold(), pat.casefold()) for pat in patterns)
 
-    return True
+    return bool(mail_config.get("allow_unmatched_pdf_attachments", True))
+
+
+def prune_history_records(history: dict, retention_days: int, *, now: float | None = None) -> list[str]:
+    if retention_days <= 0:
+        return []
+    cutoff = (datetime.datetime.now().timestamp() if now is None else now) - retention_days * 86400
+    removed = []
+    for uid, record in list(history.items()):
+        if uid == "_uidvalidity" or not isinstance(record, dict) or not record.get("date"):
+            continue
+        try:
+            received_at = parsedate_to_datetime(record["date"]).timestamp()
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if received_at < cutoff:
+            del history[uid]
+            removed.append(uid)
+    return removed
 
 
 def write_pdf_atomic(path: Path, payload: bytes) -> None:

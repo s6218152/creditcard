@@ -229,6 +229,27 @@ def test_failed_balance_preserves_statement_manifest_without_stale_amount(monkey
     assert report["balances"][0]["balance"] is None
 
 
+def test_private_bank_diagnostics_are_saved_locally_not_in_latest(monkeypatch, tmp_path):
+    import json
+    import ctbc_balance
+    from bank_login import BankQueryError
+    from main import write_json_atomic
+    write_json_atomic(tmp_path / "latest.json", {"files": []})
+
+    def fail(selector):
+        error = BankQueryError("頁面操作失敗", "browser_action_failed")
+        error.private_diagnostics = [{"visible_text": "masked local detail"}]
+        raise error
+
+    monkeypatch.setattr(ctbc_balance, "query_balance", fail)
+    assert not run_balance_query({"balance_query": {"ctbc": {"enabled": True}}},
+                                 output_dir=tmp_path)
+    latest = json.loads((tmp_path / "latest.json").read_text())
+    private = json.loads((tmp_path / "private_bank_diagnostics.json").read_text())
+    assert "private_diagnostics" not in latest["balances"][0]
+    assert private["banks"][0]["private_diagnostics"][0]["visible_text"] == "masked local detail"
+
+
 def test_pipeline_prints_balance_after_cards_and_saves_it(monkeypatch, tmp_path, capsys):
     import json
     import yaml

@@ -9,6 +9,7 @@ from mail_fetcher import (
     should_save_attachment,
     extract_fubon_statement_links,
     write_pdf_atomic,
+    prune_history_records,
 )
 from io import BytesIO
 from pypdf import PdfWriter
@@ -17,18 +18,18 @@ import yaml
 
 
 @pytest.mark.parametrize("subject,sender,allowed", [
-    ("國泰世華銀行信用卡2026年8月電子帳單", "國泰世華銀行 <notice@example.com>", True),
-    ("國泰世華銀行信用卡2026年9月電子帳單", "notice@example.com", True),
-    ("國泰世華銀行信用卡2027年01月電子帳單", "notice@example.com", True),
-    ("國泰世華銀行信用卡2027年12月電子帳單", "notice@example.com", True),
-    ("國泰世華銀行信用卡2027年13月電子帳單", "notice@example.com", False),
-    ("國泰世華銀行信用卡2027年0月電子帳單", "notice@example.com", False),
-    ("國泰世華銀行信用卡2027年1月電子帳單通知", "notice@example.com", False),
-    ("Re: 國泰世華銀行信用卡2026年8月電子帳單", "notice@example.com", False),
-    ("國泰世華銀行貸款通知", "notice@example.com", False),
-    ("本期電子對帳單", "國泰世華銀行 <notice@example.com>", False),
+    ("國泰世華銀行信用卡2026年8月電子帳單", "國泰世華銀行 <notice@example.com>", False),
+    ("國泰世華銀行信用卡2026年9月電子帳單", "notice@cathaybk.com.tw", True),
+    ("國泰世華銀行信用卡2027年01月電子帳單", "notice@cathaybk.com.tw", True),
+    ("國泰世華銀行信用卡2027年12月電子帳單", "notice@cathaybk.com.tw", True),
+    ("國泰世華銀行信用卡2027年13月電子帳單", "notice@cathaybk.com.tw", False),
+    ("國泰世華銀行信用卡2027年0月電子帳單", "notice@cathaybk.com.tw", False),
+    ("國泰世華銀行信用卡2027年1月電子帳單通知", "notice@cathaybk.com.tw", False),
+    ("Re: 國泰世華銀行信用卡2026年8月電子帳單", "notice@cathaybk.com.tw", False),
+    ("國泰世華銀行貸款通知", "notice@cathaybk.com.tw", False),
+    ("本期電子對帳單", "國泰世華銀行 <notice@cathaybk.com.tw>", False),
     ("電子對帳單", "notice@bill.cathaybk.com.tw", False),
-    ("彰化銀行2026年9月份信用卡帳單", "notice@example.com", True),
+    ("彰化銀行2026年9月份信用卡帳單", "notice@bill.chb.com.tw", True),
 ])
 def test_cathay_subject_requires_statement_title_with_valid_year_month(subject, sender, allowed):
     config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())
@@ -107,6 +108,47 @@ def test_english_mail_and_attachment_patterns_ignore_case():
     assert matches_email_filter("YOUR MONTHLY STATEMENT", "x", filters)
     config = {"bank_attachment_patterns": {"台新銀行": ["TSB_Creditcard_Estatement_*.pdf"]}}
     assert should_save_attachment("tsb_creditcard_estatement_1.pdf", "台新銀行", "", config)
+
+
+def test_untrusted_sender_is_rejected_when_policy_enabled():
+    filters = {
+        "require_trusted_sender": True,
+        "trusted_sender_domains": ["ctbcbank.com"],
+        "subjects": ["信用卡帳單"],
+    }
+    assert not matches_email_filter("信用卡帳單", "attacker@example.com", filters)
+    assert matches_email_filter("信用卡帳單", "notice@mail.ctbcbank.com", filters)
+
+
+def test_named_bank_subject_must_match_that_banks_domain():
+    filters = {
+        "require_trusted_sender": True,
+        "trusted_sender_domains": ["ctbcbank.com", "cathaybk.com.tw"],
+        "bank_sender_domains": {"中國信託": ["ctbcbank.com"]},
+        "subjects": ["信用卡帳單"],
+    }
+    assert not matches_email_filter("中國信託信用卡帳單", "notice@cathaybk.com.tw", filters)
+    assert matches_email_filter("中國信託信用卡帳單", "notice@ctbcbank.com", filters)
+
+
+@pytest.mark.parametrize("subject,sender,filename", [
+    ("第一銀行信用卡電子對帳單2026年09月03日",
+     "第一銀行 <service@ebill.firstbank.tw>", "第一銀行電子對帳單2026年09月.pdf"),
+    ("永豐銀行信用卡2026年09月份電子帳單通知",
+     "永豐銀行 <ebillservice@newebill.banksinopac.com.tw>", "永豐銀行信用卡帳單.pdf"),
+    ("遠東商銀115年09月信用卡消費明細及帳單",
+     "遠東商銀客服中心 <service@feib-ecard.com.tw>", "202609cycle-statement.pdf"),
+])
+def test_observed_statement_sender_domains_are_trusted(subject, sender, filename):
+    config = yaml.safe_load((Path(__file__).parents[1] / "config.yaml").read_text())["mail"]
+    assert matches_email_filter(subject, sender, config["local_filters"])
+    assert should_save_attachment(filename, subject, sender, config)
+
+
+def test_unmatched_pdf_is_rejected_by_strict_attachment_policy():
+    assert not should_save_attachment("unknown.pdf", "信用卡帳單", "notice@example.com", {
+        "bank_attachment_patterns": {}, "allow_unmatched_pdf_attachments": False,
+    })
 
 
 def test_chb_attachment_filter_keeps_card_statement_only():
@@ -231,3 +273,15 @@ def test_mark_fubon_link_downloaded_is_persisted_once(monkeypatch):
 
     assert fetcher.history["123"]["fubon_downloaded_links"] == [link]
     assert saves == [True]
+
+
+def test_history_retention_prunes_only_dated_old_records():
+    history = {
+        "_uidvalidity": "1",
+        "old": {"date": "Tue, 01 Jan 2019 00:00:00 +0000"},
+        "invalid": {"date": "not-a-date"},
+        "undated": {},
+    }
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+    assert prune_history_records(history, 365, now=now) == ["old"]
+    assert set(history) == {"_uidvalidity", "invalid", "undated"}

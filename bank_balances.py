@@ -3,19 +3,21 @@
 import argparse
 import importlib
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 import yaml
 
-from bank_registry import MANUAL_BANKS, normalize_bank
+from bank_registry import normalize_bank
+from bank_specs import BANK_SPECS
 
-BANKS = {"ctbc": ("中國信託", "ctbc_balance"), "sinopac": ("永豐銀行", "sinopac_balance")}
-
-BANKS.update({key: (entry[0], "manual_bank_balance") for key, entry in MANUAL_BANKS.items()})
+BANKS = {key: (spec.name, spec.balance_module) for key, spec in BANK_SPECS.items()}
 
 
-def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_summary: bool = True, show_results: bool = True) -> bool:
+def run_queries(config: dict, interactive: bool = True, *, on_result=None,
+                on_private_diagnostics=None, show_summary: bool = True,
+                show_results: bool = True) -> bool:
     settings = config.get("balance_query", {})
     enabled = [key for key in settings if settings[key].get("enabled", False)]
     unknown = [key for key in enabled if key not in BANKS]
@@ -33,12 +35,14 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
     succeeded = True
     for key in enabled:
         name, module = BANKS[key]
+        started_at = time.monotonic()
         print(f"[{name}] 正在啟動本次查詢的 Chrome 並開啟登入頁…", flush=True)
         try:
             reader = importlib.import_module(module).query_balance
             selector = settings[key].get("balance_selector") or None
-            balance = reader(key, selector) if key in MANUAL_BANKS else reader(selector)
+            balance = reader(key, selector) if module == "manual_bank_balance" else reader(selector)
             queried_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            duration_seconds = round(time.monotonic() - started_at, 3)
             currency = "TWD" if key == "ctbc" else getattr(balance, "currency", None)
             label = "臺幣活期存款餘額" if getattr(balance, "scope", None) == "twd_current_deposit_total" else "臺幣存款餘額"
             row = (f"{name}{label}：NT$ {balance:,.2f}" if currency
@@ -51,13 +55,14 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
                 on_result({"bank": key, "bank_name": name, "status": "success",
                            "balance": str(balance), "currency": currency,
                            "scope": "twd_deposit_total" if key == "ctbc" else getattr(balance, "scope", "single_account"),
-                           "queried_at": queried_at})
+                           "queried_at": queried_at, "duration_seconds": duration_seconds})
         except KeyboardInterrupt:
             print(f"[{name}餘額] 查詢已取消，已完成的結果已保留。")
             succeeded = False
             if on_result:
                 on_result({"bank": key, "bank_name": name, "status": "cancelled", "balance": None,
-                           "queried_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+                           "queried_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                           "duration_seconds": round(time.monotonic() - started_at, 3)})
             break
         except Exception as error:
             print(f"[{name}餘額] 查詢失敗：{error}")
@@ -69,12 +74,20 @@ def run_queries(config: dict, interactive: bool = True, *, on_result=None, show_
                 import json
                 print(f"[{name}頁面診斷] {json.dumps(diagnostics, ensure_ascii=False)}")
             succeeded = False
+            private_diagnostics = getattr(error, "private_diagnostics", [])
+            if private_diagnostics and on_private_diagnostics:
+                on_private_diagnostics({
+                    "bank": key,
+                    "bank_name": name,
+                    "queried_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "private_diagnostics": private_diagnostics,
+                })
             if on_result:
                 on_result({"bank": key, "bank_name": name, "status": "error", "balance": None,
                            "error_message": str(error), "error_code": error_code,
                            "diagnostics": diagnostics,
-                           "private_diagnostics": getattr(error, "private_diagnostics", []),
-                           "queried_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+                           "queried_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                           "duration_seconds": round(time.monotonic() - started_at, 3)})
     if results and show_summary and show_results:
         print("\n=== 本次餘額查詢結果 ===")
         for result in results:

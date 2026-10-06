@@ -7,6 +7,40 @@ mail:
   
   # 本地過濾器：主旨或寄件者中必須包含以下任一關鍵字才會被下載與解析
   local_filters:
+    require_trusted_sender: true
+    trusted_sender_domains:
+      - "ctbcbank.com"
+      - "cathaybk.com.tw"
+      - "esunbank.com"
+      - "esunbank.com.tw"
+      - "taishinbank.com.tw"
+      - "taipeifubon.com.tw"
+      - "dbs.com"
+      - "dbs.com.tw"
+      - "sinopac.com"
+      - "banksinopac.com.tw"
+      - "skbank.com.tw"
+      - "feib.com.tw"
+      - "feib-ecard.com.tw"
+      - "firstbank.tw"
+      - "ubot.com.tw"
+      - "chb.com.tw"
+      - "scsb.com.tw"
+    bank_sender_domains:
+      中國信託: ["ctbcbank.com"]
+      國泰世華: ["cathaybk.com.tw"]
+      玉山銀行: ["esunbank.com", "esunbank.com.tw"]
+      台新銀行: ["taishinbank.com.tw"]
+      台北富邦: ["taipeifubon.com.tw"]
+      星展: ["dbs.com", "dbs.com.tw"]
+      永豐銀行: ["sinopac.com", "banksinopac.com.tw"]
+      新光銀行: ["skbank.com.tw"]
+      遠東商銀: ["feib.com.tw", "feib-ecard.com.tw"]
+      第一銀行: ["firstbank.tw"]
+      聯邦銀行: ["ubot.com.tw"]
+      彰化銀行: ["chb.com.tw"]
+      彰銀: ["chb.com.tw"]
+      上海商銀: ["scsb.com.tw"]
     bank_subject_rules:
       國泰世華:
         sender_domains: ["cathaybk.com.tw"]
@@ -42,10 +76,16 @@ mail:
       - "彰銀"
 
   bank_attachment_patterns:
+    中國信託:
+      - "*.pdf"
+    國泰世華:
+      - "*.pdf"
     台新銀行:
       - "TSB_Creditcard_Estatement_*.pdf"
     玉山銀行:
       - "ESUN_Estatement_*.pdf"
+    第一銀行:
+      - "*.pdf"
     永豐銀行:
       - "永豐銀行信用卡帳單.pdf"
     遠東商銀:
@@ -54,6 +94,13 @@ mail:
       - "UBOT_Estatement_*.pdf"
     彰化銀行:
       - "*信用卡對帳單.pdf"
+    星展銀行:
+      - "*.pdf"
+    上海商銀:
+      - "*.pdf"
+    新光銀行:
+      - "*.pdf"
+  allow_unmatched_pdf_attachments: false
   bank_pdf_passwords:
     台新銀行: "${TAISHIN_PDF_PASSWORD}"
     彰化銀行: "${BANK_ID}"
@@ -63,6 +110,7 @@ storage:
   download_dir: "downloads"
   output_dir: "output"
   history_file: "downloads/history.json"
+  retention_days: 730
   pdf_password_patterns:
     "*CBGCC-DAILYSTMT_*.pdf": "${CBGCC_DAILY_PDF_PASSWORD}"
     "*ESUN_Estatement_*.pdf": ""

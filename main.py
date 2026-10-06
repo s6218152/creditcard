@@ -4,7 +4,6 @@ import hashlib
 import logging
 import fnmatch
 import tempfile
-import re
 from decimal import Decimal
 import yaml
 from pathlib import Path
@@ -16,40 +15,19 @@ from parsers.engine import get_parser_for_text, PARSER_ENGINE_VERSION
 from statement_filter import latest_statement_flags
 from fubon_downloader import FubonStatementDownloader
 from config_validation import validate_config
-from storage_utils import private_directory, private_file
+from storage_utils import private_directory, private_file, prune_old_files
+from bank_specs import identify_statement
 
 logger = logging.getLogger(__name__)
 
 def detect_bank_from_filename(filename: str) -> str:
-    bank_patterns = {
-        "中國信託": ["中國信託", "ctbc", "china trust"],
-        "第一銀行": ["第一銀行", "first bank"],
-        "國泰世華": ["國泰世華", "cathay", "信用卡電子帳單消費明細"],
-        "玉山銀行": ["玉山銀行", "esun", "e.sun"],
-        "台新銀行": ["台新銀行", "tsb", "taishin"],
-        "台北富邦": ["台北富邦", "fubon"],
-        "花旗": ["花旗", "citibank"],
-        "渣打": ["渣打", "standard chartered"],
-        "星展": ["星展", "dbs", "cbgcc-dailystmt"],
-        "上海商銀": ["上海商銀", "shanghai"],
-        "永豐銀行": ["永豐", "sinopac"],
-        "新光銀行": ["新光銀行", "skbank"],
-        "遠東商銀": ["遠東商銀", "fareastone", "feib", "cycle-statement"],
-        "聯邦銀行": ["聯邦銀行", "ubot"],
-        "彰化銀行": ["彰化銀行", "彰銀", "chb"],
-    }
-    lower_name = filename.lower()
-    for bank, patterns in bank_patterns.items():
-        if any(pattern in lower_name for pattern in patterns):
-            return bank
-    if re.search(r"信用卡帳單20\d{2}年\d{1,2}月", lower_name):
-        return "新光銀行"
-    return "未知銀行"
+    spec = identify_statement(filename)
+    return spec.name if spec else "未知銀行"
 
 
 def is_ctbc_statement(pdf_path: Path) -> bool:
-    filename = pdf_path.name.lower()
-    return "ctbc" in filename or "中國信託" in filename or "china trust" in filename
+    spec = identify_statement(pdf_path.name)
+    return bool(spec and spec.parser == "ctbc")
 
 
 def keep_latest_statements(pdf_files: list[Path]) -> list[Path]:
@@ -209,8 +187,17 @@ def run_balance_query(config: dict, interactive: bool = True, output_dir: Path |
             report["balances"].append(result)
             write_json_atomic(output_dir / "latest.json", report)
 
+    private_report = {"schema_version": 1, "banks": []}
+    if report is not None:
+        write_json_atomic(output_dir / "private_bank_diagnostics.json", private_report)
+
+    def save_private_diagnostics(result):
+        private_report["banks"].append(result)
+        write_json_atomic(output_dir / "private_bank_diagnostics.json", private_report)
+
     return run_queries(config, interactive=interactive,
                        on_result=save_result if report is not None else None,
+                       on_private_diagnostics=save_private_diagnostics if report is not None else None,
                        show_summary=False, show_results=show_results)
 
 
@@ -291,6 +278,11 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     output_dir = base_dir / config["storage"]["output_dir"]
     private_directory(download_dir)
     private_directory(output_dir)
+    retention_days = config["storage"].get("retention_days", 730)
+    removed = prune_old_files(download_dir, ("*.pdf",), retention_days)
+    removed += prune_old_files(output_dir, ("*_parsed.json",), retention_days)
+    if removed:
+        print(f"已依 {retention_days} 天留存政策清除 {len(removed)} 個舊帳單檔案。")
 
     print("=== 步驟 1: 檢查 Yahoo 信箱下載最新帳單 ===")
     fetcher = MailFetcher(config_path)

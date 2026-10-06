@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 from bank_registry import SUPPORTED_BANKS
 
@@ -28,6 +29,38 @@ def validate_config(config: dict, base_dir: Path) -> None:
         values = filters.get(key, [])
         if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
             raise ValueError(f"mail.local_filters.{key} 必須是字串清單")
+    if type(filters.get("require_trusted_sender", False)) is not bool:
+        raise ValueError("mail.local_filters.require_trusted_sender 必須是布林值")
+    domains = filters.get("trusted_sender_domains", [])
+    if (not isinstance(domains, list) or not all(isinstance(domain, str) and
+            re.fullmatch(r"[A-Za-z0-9.-]+", domain) for domain in domains)):
+        raise ValueError("mail.local_filters.trusted_sender_domains 必須是網域字串清單")
+    if filters.get("require_trusted_sender", False) and not domains:
+        raise ValueError("啟用寄件者驗證時必須設定 trusted_sender_domains")
+    bank_sender_domains = filters.get("bank_sender_domains", {})
+    if not isinstance(bank_sender_domains, dict) or not all(
+            isinstance(bank, str) and isinstance(values, list) and values
+            and all(isinstance(domain, str) and re.fullmatch(r"[A-Za-z0-9.-]+", domain)
+                    for domain in values)
+            for bank, values in bank_sender_domains.items()):
+        raise ValueError("mail.local_filters.bank_sender_domains 必須是銀行對應網域清單")
+    subject_rules = filters.get("bank_subject_rules", {})
+    if not isinstance(subject_rules, dict):
+        raise ValueError("mail.local_filters.bank_subject_rules 必須是對應表")
+    for bank, rule in subject_rules.items():
+        if not isinstance(bank, str) or not isinstance(rule, dict):
+            raise ValueError("bank_subject_rules 的銀行與規則格式不正確")
+        for key in ("sender_domains", "exact_subjects", "subject_regexes"):
+            values = rule.get(key, [])
+            if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+                raise ValueError(f"bank_subject_rules.{bank}.{key} 必須是字串清單")
+        try:
+            for pattern in rule.get("subject_regexes", []):
+                re.compile(pattern)
+        except re.error as error:
+            raise ValueError(f"bank_subject_rules.{bank}.subject_regexes 含無效正規表示式") from error
+    if type(mail.get("allow_unmatched_pdf_attachments", True)) is not bool:
+        raise ValueError("mail.allow_unmatched_pdf_attachments 必須是布林值")
     for section, keys in ((mail, ("bank_attachment_patterns", "bank_pdf_passwords")),
                           (config["storage"], ("pdf_password_patterns",))):
         for key in keys:
@@ -53,6 +86,9 @@ def validate_config(config: dict, base_dir: Path) -> None:
         target = (root / value).resolve()
         if not target.is_relative_to(root) or target == root:
             raise ValueError(f"storage.{key} 必須位於專案目錄內")
+    retention_days = storage.get("retention_days", 730)
+    if type(retention_days) is not int or retention_days < 0:
+        raise ValueError("storage.retention_days 必須是非負整數；0 表示停用清理")
     if not isinstance(config.get("schedule", {}), dict):
         raise ValueError("schedule 必須是對應表")
     hours = config.get("schedule", {}).get("interval_hours", 12)

@@ -3,7 +3,6 @@ fonttools>=4.0.0
 pdfplumber>=0.10.0
 python-dotenv>=1.0.0
 pyyaml>=6.0
-pytest>=8.0.0
 Pillow>=10.0.0
 playwright>=1.63.0
 ddddocr==1.6.1

@@ -4,7 +4,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from bank_diagnostics import collect_page_diagnostics, diagnostic_chrome_context, has_verification_challenge
+from bank_diagnostics import (collect_page_diagnostics, diagnostic_chrome_context,
+                              has_verification_challenge, redact_private_text)
+
+
+def test_private_text_redacts_identifiers_email_accounts_and_currency():
+    text = "A123456789 owner@example.com 帳號 123-456-789 NT$ 22,542.00"
+    redacted = redact_private_text(text)
+    assert "A123456789" not in redacted
+    assert "owner@example.com" not in redacted
+    assert "123-456-789" not in redacted
+    assert "22,542.00" not in redacted
 
 
 def test_private_failure_text_masks_credentials_and_skips_foreign_frames(monkeypatch):

@@ -45,6 +45,14 @@ def redact(text):
     return text
 
 
+def public_report(report):
+    """Drop local-only diagnostics even when reading an older report file."""
+    result = json.loads(json.dumps(report))
+    for balance in result.get("balances", []):
+        balance.pop("private_diagnostics", None)
+    return result
+
+
 def chunks(text, limit=3500):
     # Telegram counts UTF-16 units; emoji can consume two units.
     part, size = [], 0
@@ -116,7 +124,7 @@ def main():
     config = yaml.safe_load(Path("config.yaml").read_text())
     output_dir = Path(config["storage"]["output_dir"])
     latest = output_dir / "latest.json"
-    report = json.loads(latest.read_text()) if latest.exists() else {}
+    report = public_report(json.loads(latest.read_text())) if latest.exists() else {}
     for balance in report.get("balances", []):
         if balance.get("error_code") == "verification_required":
             header += f"{balance['bank_name']}：需要人工驗證（可能為 OTP），本次未取得餘額。\n"
@@ -132,7 +140,7 @@ def main():
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr("console.txt", output)
         if latest.exists():
-            bundle.writestr("latest.json", redact(latest.read_text()))
+            bundle.writestr("latest.json", redact(json.dumps(report, ensure_ascii=False, indent=2)))
         for name in report.get("files", []):
             path = output_dir / Path(name).name
             if path.exists():

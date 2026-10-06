@@ -1,4 +1,15 @@
+[project]
+name = "creditcard-statement-tools"
+version = "0.1.0"
+requires-python = ">=3.11"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[tool.ruff]
+target-version = "py311"
+exclude = ["venv", ".venv", "downloads", "output"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
