@@ -15,7 +15,7 @@ import hashlib
 import io
 import pypdf
 from email.utils import parsedate_to_datetime, parseaddr
-from statement_filter import latest_statement_flags
+from statement_filter import latest_statement_flags, STATEMENT_SELECTION_VERSION
 from config_validation import validate_config
 from storage_utils import private_directory, private_file
 from bank_specs import BANK_SPECS
@@ -283,6 +283,11 @@ class MailFetcher:
                 elif ((record.get("matched") is False or record.get("excluded") is True)
                       and record.get("filter_fingerprint") != filter_fingerprint):
                     new_uids.append(uid)
+                elif (record.get("matched") is not False and record.get("excluded") is not True
+                      and record.get("attachment_selection_version") != STATEMENT_SELECTION_VERSION):
+                    # Revisit legacy matches once: the old filename-only policy
+                    # may have skipped a distinct account's attachment.
+                    new_uids.append(uid)
             print(f"排除已下載歷史紀錄後，尚有 {len(new_uids)} 封新郵件待檢查標頭。")
             
             if not new_uids:
@@ -354,6 +359,7 @@ class MailFetcher:
             
             downloaded_count = 0
             pending_attachments = []
+            used_filenames = set()
             scanned_emails = {}
             
             # 開始下載符合條件的完整信件並提取 PDF
@@ -375,7 +381,10 @@ class MailFetcher:
                 full_msg = email.message_from_bytes(raw_email)
                 
                 # 搜尋並儲存 PDF 附件
-                attachments = []
+                previous_record = self.history.get(uid_str, {})
+                if not isinstance(previous_record, dict):
+                    previous_record = {}
+                attachments = list(previous_record.get("attachments", []))
                 attachment_failed = False
                 scanned_emails[uid_str] = {
                     "subject": subject,
@@ -385,6 +394,7 @@ class MailFetcher:
                     "failed": False,
                     "fubon_links": [],
                     "fubon_links_scanned": False,
+                    "fubon_downloaded_links": list(previous_record.get("fubon_downloaded_links", [])),
                 }
                 for part in full_msg.walk():
                     if part.get_content_maintype() == 'multipart':
@@ -409,6 +419,14 @@ class MailFetcher:
                                 attachment_failed = True
                                 print(f"  附件內容為空，稍後重試: {filename}")
                                 continue
+                            stem, suffix = Path(save_filename).stem, Path(save_filename).suffix
+                            unique_filename = save_filename
+                            counter = 2
+                            while unique_filename in used_filenames:
+                                unique_filename = f"{stem}_{counter}{suffix}"
+                                counter += 1
+                            save_filename = unique_filename
+                            used_filenames.add(save_filename)
                             try:
                                 received_at = parsedate_to_datetime(date_str).timestamp()
                             except (TypeError, ValueError, OverflowError):
@@ -422,7 +440,8 @@ class MailFetcher:
                             })
 
                 fubon_links = extract_fubon_statement_links(full_msg)
-                scanned_emails[uid_str]["fubon_links"] = fubon_links
+                scanned_emails[uid_str]["fubon_links"] = list(dict.fromkeys(
+                    previous_record.get("fubon_links", []) + fubon_links))
                 scanned_emails[uid_str]["fubon_links_scanned"] = True
                 
                 if attachment_failed:
@@ -445,13 +464,15 @@ class MailFetcher:
                     print(f"  附件驗證或儲存失敗，稍後重試: {save_path.name}: {exc}")
                     continue
                 print(f"  已下載附件: {save_path.name}")
-                attachment["email"]["attachments"].append(str(save_path))
+                if str(save_path) not in attachment["email"]["attachments"]:
+                    attachment["email"]["attachments"].append(str(save_path))
                 downloaded_count += 1
 
             history_changed = False
             for uid_str, record in scanned_emails.items():
                 if record.pop("failed"):
                     continue
+                record["attachment_selection_version"] = STATEMENT_SELECTION_VERSION
                 self.history[uid_str] = record
                 history_changed = True
             if history_changed:

@@ -1,9 +1,101 @@
 from types import SimpleNamespace
+import subprocess
+import sys
 
 import pytest
 
 import bank_captcha
 from bank_captcha import decode_numeric_result, recognize_numeric_captcha, try_fill_captcha
+
+
+@pytest.fixture
+def isolated_test_worker(monkeypatch):
+    """Exercise the real pipe protocol without OCR dependencies or image files."""
+    launched = []
+    original_popen = subprocess.Popen
+    script = """
+import os
+import time
+import bank_captcha
+def recognize(image, *args):
+    if image == b'timeout':
+        time.sleep(60)
+    if image == b'crash':
+        os._exit(7)
+    return bank_captcha.Recognition('123456', 'strong_agreement')
+bank_captcha._worker_result = recognize
+bank_captcha._serve_worker()
+"""
+
+    def launch(*args, **kwargs):
+        process = original_popen([sys.executable, "-c", script], **kwargs)
+        launched.append(process)
+        return process
+
+    monkeypatch.setattr(bank_captcha.subprocess, "Popen", launch)
+    return launched
+
+
+def test_isolated_worker_reuses_process_and_closes_it(isolated_test_worker):
+    with bank_captcha.CaptchaWorker() as worker:
+        assert worker.recognize(b"first", 6).text == "123456"
+        assert worker.recognize(b"second", 6).text == "123456"
+        assert len(isolated_test_worker) == 1
+        process = isolated_test_worker[0]
+        assert process.poll() is None
+    assert process.poll() is not None
+    assert process.stdin.closed and process.stdout.closed
+
+
+@pytest.mark.parametrize("image,reason", [(b"timeout", "worker_timeout"), (b"crash", "worker_crashed")])
+def test_isolated_worker_stops_failed_process_and_recovers(isolated_test_worker, monkeypatch, image, reason):
+    with bank_captcha.CaptchaWorker() as worker:
+        assert worker.recognize(b"warmup", 6).text == "123456"
+        monkeypatch.setattr(bank_captcha, "WORKER_TIMEOUT", 0.1)
+        assert worker.recognize(image, 6).reason == reason
+        assert isolated_test_worker[0].poll() is not None
+        monkeypatch.setattr(bank_captcha, "WORKER_TIMEOUT", 20)
+        assert worker.recognize(b"recovered", 6).text == "123456"
+        assert len(isolated_test_worker) == 2
+    assert all(process.poll() is not None for process in isolated_test_worker)
+
+
+def test_isolated_worker_cleans_up_on_cancellation(isolated_test_worker):
+    with pytest.raises(KeyboardInterrupt):
+        with bank_captcha.CaptchaWorker() as worker:
+            assert worker.recognize(b"image", 6).text == "123456"
+            raise KeyboardInterrupt
+    assert isolated_test_worker[0].poll() is not None
+
+
+@pytest.mark.parametrize("image,length,alphabet", [(b"", 6, "digits"), (b"x" * 512_001, 6, "digits"), (b"image", 7, "digits"), (b"image", 6, "other")])
+def test_isolated_worker_rejects_invalid_input_before_launch(isolated_test_worker, image, length, alphabet):
+    with bank_captcha.CaptchaWorker() as worker:
+        assert worker.recognize(image, length, alphabet).reason == "invalid_image"
+    assert isolated_test_worker == []
+
+
+def test_captcha_attempts_share_one_worker_and_cleanup(isolated_test_worker, monkeypatch):
+    attempts = []
+    fills = []
+    field = SimpleNamespace(input_value=lambda: "")
+    refresh = SimpleNamespace(count=lambda: 1, click=lambda **kwargs: None)
+    frame = SimpleNamespace(url="https://www.chb.com.tw/login", locator=lambda selector: refresh)
+    page = SimpleNamespace(url=frame.url, wait_for_timeout=lambda timeout: None)
+
+    def fill_once(page, frame, spec, field, is_official, worker):
+        result = bank_captcha.run_captcha_worker(b"image", spec.length, spec.alphabet,
+                                               spec.consensus_fallback, spec.all_model_consensus, worker)
+        fills.append(result.text)
+        attempts.append(worker)
+        return len(attempts) == 2
+
+    monkeypatch.setattr(bank_captcha, "_fill_once", fill_once)
+    assert try_fill_captcha(page, frame, "chb", field, lambda url: True)
+    assert fills == ["123456", "123456"]
+    assert attempts[0] is attempts[1]
+    assert len(isolated_test_worker) == 1
+    assert isolated_test_worker[0].poll() is not None
 
 
 def prediction(text, confidence=0.999):

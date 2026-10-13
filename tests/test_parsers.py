@@ -100,6 +100,20 @@ def test_parse_transaction_details_single_date():
     assert details[1]["description"] == "台灣電力公司"
     assert details[1]["amount"] == 1850
 
+
+@pytest.mark.parametrize("dates,post_date", [
+    ("09/01 09/03", "09/03"),
+    ("09/01", ""),
+])
+@pytest.mark.parametrize("merchant", ["PChome 24h購物", "商店 7 ELEVEN", "商城 2026 活動"])
+def test_transaction_amount_comes_from_final_column(dates, post_date, merchant):
+    result = GeneralParser().parse(f"消費明細\n{dates} {merchant} NT$ -1,234.50")
+
+    assert result["details"] == [{
+        "date": "09/01", "post_date": post_date,
+        "description": merchant, "amount": -1234.50,
+    }]
+
 def test_parse_due_date():
     parser = GeneralParser()
     text = "繳款截止日：2026/08/20\n本期應繳總金額：$5,000"

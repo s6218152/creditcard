@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 import yaml
 from dotenv import dotenv_values
@@ -51,6 +52,23 @@ def public_report(report):
     for balance in result.get("balances", []):
         balance.pop("private_diagnostics", None)
     return result
+
+
+def read_current_report(path, run_id):
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(report, dict) or report.get("run_id") != run_id:
+        return None
+    if not isinstance(report.get("generated_at"), str):
+        return None
+    if (not isinstance(report.get("files", []), list)
+            or not all(isinstance(name, str) for name in report.get("files", []))
+            or not isinstance(report.get("balances", []), list)
+            or not all(isinstance(row, dict) for row in report.get("balances", []))):
+        return None
+    return public_report(report)
 
 
 def chunks(text, limit=3500):
@@ -100,6 +118,7 @@ def main():
 
     # Do not stream bank/email errors or credentials into public Actions logs.
     banks = []
+    run_id = uuid4().hex
     with tempfile.TemporaryFile() as log:
         try:
             command = [sys.executable, "main.py"]
@@ -108,7 +127,8 @@ def main():
             for bank in banks:
                 command.extend(["--bank", bank])
             result = subprocess.run(command, stdout=log,
-                                    stderr=subprocess.STDOUT, timeout=2400)
+                                    stderr=subprocess.STDOUT, timeout=2400,
+                                    env={**os.environ, "CREDITCARD_REPORT_RUN_ID": run_id})
             succeeded = result.returncode == 0
         except subprocess.TimeoutExpired:
             succeeded = False
@@ -118,13 +138,17 @@ def main():
             log.write(f"銀行篩選設定錯誤：{error}\n".encode())
         log.seek(0)
         output = redact(log.read().decode("utf-8", errors="replace"))
-    header = "信用卡完整報告\n" + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
-    if banks:
-        header += "本次僅測試銀行餘額：" + "、".join(banks) + "\n"
     config = yaml.safe_load(Path("config.yaml").read_text())
     output_dir = Path(config["storage"]["output_dir"])
     latest = output_dir / "latest.json"
-    report = public_report(json.loads(latest.read_text())) if latest.exists() else {}
+    current_report = read_current_report(latest, run_id)
+    succeeded = succeeded and current_report is not None
+    report = current_report if current_report is not None else {}
+    header = "信用卡完整報告\n" + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
+    if current_report is None:
+        header += "本次尚未產出可確認的報告。\n"
+    if banks:
+        header += "本次僅測試銀行餘額：" + "、".join(banks) + "\n"
     for balance in report.get("balances", []):
         if balance.get("error_code") == "verification_required":
             header += f"{balance['bank_name']}：需要人工驗證（可能為 OTP），本次未取得餘額。\n"
@@ -139,15 +163,16 @@ def main():
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
         bundle.writestr("console.txt", output)
-        if latest.exists():
+        if current_report is not None:
             bundle.writestr("latest.json", redact(json.dumps(report, ensure_ascii=False, indent=2)))
         private_path = output_dir / "private_bank_diagnostics.json"
-        if private_path.exists():
+        if current_report is not None and private_path.exists():
             private_report = json.loads(private_path.read_text())
             current = {(row.get("bank"), row.get("queried_at"))
                        for row in report.get("balances", []) if row.get("bank") and row.get("queried_at")}
             private_rows = [row for row in private_report.get("banks", [])
-                            if (row.get("bank"), row.get("queried_at")) in current]
+                            if private_report.get("run_id") == run_id
+                            and (row.get("bank"), row.get("queried_at")) in current]
             if private_rows:
                 bundle.writestr(private_path.name, redact(json.dumps(
                     {"schema_version": 1, "banks": private_rows}, ensure_ascii=False, indent=2)))

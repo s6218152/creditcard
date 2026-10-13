@@ -24,10 +24,12 @@ def prune_old_files(directory: Path, patterns: tuple[str, ...], retention_days: 
     removed = []
     candidates = {path for pattern in patterns for path in directory.glob(pattern)}
     for path in sorted(candidates):
+        if path.is_symlink():
+            continue
         resolved = path.resolve()
         if (not resolved.is_relative_to(directory) or not resolved.is_file()
                 or resolved.stat().st_mtime >= cutoff):
             continue
-        resolved.unlink()
-        removed.append(resolved)
+        path.unlink()
+        removed.append(path)
     return removed

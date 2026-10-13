@@ -85,6 +85,20 @@ def test_hncb_rejects_missing_or_duplicate_accounts_instead_of_guessing():
         parse_hncb_deposit_rows(duplicate)
 
 
+@pytest.mark.parametrize("partial_row", [
+    ["222", "活儲", "新台幣", "997.00", "997.00", "-", "-", "餘額", "明細", "查詢"],
+    ["222", "活儲"],
+    ["222", "活儲", ""],
+])
+def test_hncb_rejects_partial_twd_rows_instead_of_returning_a_partial_total(partial_row):
+    rows = [
+        ["111", "活儲", "新台幣", "203.00", "203.00", "-", "-", "餘額", "明細", "轉帳", "查詢"],
+        partial_row,
+    ]
+    with pytest.raises(ValueError, match="完整"):
+        parse_hncb_deposit_rows(rows)
+
+
 def test_dbs_deposit_access_check_ignores_foreign_or_unrelated_pages():
     url = "https://internet-banking.dbs.com.tw/digitw/overview"
     foreign = frame("https://evil.example/", "請洽分行開立存款帳號")

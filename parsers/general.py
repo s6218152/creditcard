@@ -21,11 +21,11 @@ class GeneralParser(BaseParser):
         # 用於匹配單行消費明細的正規表示式
         # 模式一：兩個日期 (消費日 + 入帳日) + 描述 + 金額
         self.tx_pattern_two_dates = re.compile(
-            r'(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(.+?)\s+(?:NT\$)?\$?\s*([-\d,.]+)'
+            r'(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(.+?)\s+(?:NT\$)?\$?\s*([-\d,.]+)\s*$'
         )
         # 模式二：一個日期 (消費日) + 描述 + 金額
         self.tx_pattern_one_date = re.compile(
-            r'(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(.+?)\s+(?:NT\$)?\$?\s*([-\d,.]+)'
+            r'(\d{2}/\d{2}|\d{4}/\d{2}/\d{2})\s+(.+?)\s+(?:NT\$)?\$?\s*([-\d,.]+)\s*$'
         )
 
     def parse_amount(self, amount_str: str) -> float:

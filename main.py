@@ -4,7 +4,9 @@ import hashlib
 import logging
 import fnmatch
 import tempfile
+from datetime import datetime, timezone
 from decimal import Decimal
+from uuid import uuid4
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
@@ -185,10 +187,13 @@ def run_balance_query(config: dict, interactive: bool = True, output_dir: Path |
     def save_result(result):
         if report is not None:
             report["balances"].append(result)
+            report["generated_at"] = datetime.now(timezone.utc).isoformat()
             write_json_atomic(output_dir / "latest.json", report)
 
     private_report = {"schema_version": 1, "banks": []}
     if report is not None:
+        if report.get("run_id"):
+            private_report["run_id"] = report["run_id"]
         write_json_atomic(output_dir / "private_bank_diagnostics.json", private_report)
 
     def save_private_diagnostics(result):
@@ -252,7 +257,7 @@ def print_statement_summaries(summaries: list, balances: list) -> set:
     return displayed
 
 
-def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None):
+def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None, *, run_id=None):
     """
     執行完整的下載與解析流程。
     """
@@ -278,6 +283,30 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     output_dir = base_dir / config["storage"]["output_dir"]
     private_directory(download_dir)
     private_directory(output_dir)
+    run_metadata = {
+        "schema_version": 1,
+        "parser_version": PARSER_ENGINE_VERSION,
+        "run_id": run_id or uuid4().hex,
+        "pipeline_status": "running",
+    }
+
+    def save_manifest(files):
+        write_json_atomic(output_dir / "latest.json", {
+            **run_metadata, "generated_at": datetime.now(timezone.utc).isoformat(),
+            "files": files, "balances": [],
+        })
+
+    def finish_run(succeeded):
+        path = output_dir / "latest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["pipeline_status"] = "success" if succeeded else "error"
+        manifest["generated_at"] = datetime.now(timezone.utc).isoformat()
+        write_json_atomic(path, manifest)
+        return succeeded
+
+    # Establish this run before any downloads so an interrupted run cannot
+    # accidentally reuse the previous run's financial results.
+    save_manifest([])
     retention_days = config["storage"].get("retention_days", 730)
     removed = prune_old_files(download_dir, ("*.pdf",), retention_days)
     removed += prune_old_files(output_dir, ("*_parsed.json",), retention_days)
@@ -352,11 +381,8 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     pdf_files = latest_pdf_files
     if not pdf_files:
         print("未在下載目錄中找到任何 PDF 檔案。請確認是否有收到對帳單郵件，或檢查 .env 設定。")
-        write_json_atomic(output_dir / "latest.json", {
-            "schema_version": 1, "parser_version": PARSER_ENGINE_VERSION, "files": [],
-        })
         balance_succeeded = run_balance_query(config, interactive=interactive, output_dir=output_dir)
-        return mail_fetch_succeeded and fubon_fetch_succeeded and balance_succeeded
+        return finish_run(mail_fetch_succeeded and fubon_fetch_succeeded and balance_succeeded)
 
     print(f"共找到 {len(pdf_files)} 個 PDF 帳單進行處理。")
     
@@ -384,11 +410,7 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
         summaries.append((bank_name, parsed_result))
 
     print("-" * 50)
-    write_json_atomic(output_dir / "latest.json", {
-        "schema_version": 1,
-        "parser_version": PARSER_ENGINE_VERSION,
-        "files": current_results,
-    })
+    save_manifest(current_results)
     balance_succeeded = run_balance_query(config, interactive=interactive, output_dir=output_dir,
                                           show_results=False)
     balances = json.loads((output_dir / "latest.json").read_text(encoding="utf-8"))["balances"]
@@ -405,7 +427,7 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     print("所有帳單處理完成！")
     if not mail_fetch_succeeded or not fubon_fetch_succeeded:
         print("注意：本次部分下載流程失敗，上述結果可能包含先前下載的帳單。")
-    return mail_fetch_succeeded and fubon_fetch_succeeded and parse_failures == 0 and balance_succeeded
+    return finish_run(mail_fetch_succeeded and fubon_fetch_succeeded and parse_failures == 0 and balance_succeeded)
 
 if __name__ == "__main__":
     import argparse
@@ -415,4 +437,5 @@ if __name__ == "__main__":
     parser.add_argument("--bank", type=normalize_bank, choices=sorted(SUPPORTED_BANKS), action="append",
                         help="帳單完成後只查指定銀行的餘額，可重複使用")
     args = parser.parse_args()
-    raise SystemExit(0 if run_pipeline(args.config, balance_banks=args.bank) else 1)
+    raise SystemExit(0 if run_pipeline(args.config, balance_banks=args.bank,
+                                     run_id=os.getenv("CREDITCARD_REPORT_RUN_ID")) else 1)

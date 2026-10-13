@@ -57,6 +57,26 @@ def test_dbs_credit_card_only_page_is_not_a_deposit_balance(page):
         read_dbs_twd_balance(page)
 
 
+def test_hncb_preserves_hidden_action_columns_and_ignores_hidden_rows(page):
+    from manual_bank_balance import read_hncb_twd_balance
+
+    load_mock_page(page, "https://netbank.hncb.com.tw/netbank/overview", """
+        <table><tbody>
+        <tr><td>帳號</td><td>類別</td><td>幣別</td><td>帳上餘額</td></tr>
+        <tr><td>原幣</td><td>折合新台幣</td></tr>
+        <tr><td>111</td><td>活儲</td><td>新台幣</td><td>203.00</td><td>203.00</td>
+            <td>-</td><td>-</td><td>餘額</td><td>明細</td><td>轉帳</td><td>查詢</td></tr>
+        <tr><td>222</td><td>活儲</td><td>新台幣</td><td>997.00</td><td>997.00</td>
+            <td>-</td><td>-</td><td>餘額</td><td>明細</td><td style="display:none">轉帳</td><td>查詢</td></tr>
+        <tr style="display:none"><td>111</td><td>活儲</td><td>新台幣</td><td>203.00</td><td>203.00</td>
+            <td>-</td><td>-</td><td>餘額</td><td>明細</td><td>轉帳</td><td>查詢</td></tr>
+        </tbody></table>
+    """)
+    value = read_hncb_twd_balance(page)
+    assert value == Decimal("1200.00")
+    assert value.scope == "twd_current_deposit_total"
+
+
 @pytest.mark.parametrize("label", ["登入", "Log in"])
 def test_shanghai_login_form_accepts_official_chinese_and_english_buttons(page, label):
     from bank_login import locate_form

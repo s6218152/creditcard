@@ -1,9 +1,12 @@
 from io import BytesIO
 from pathlib import Path
+import subprocess
 
+from PIL import Image
 from pypdf import PdfWriter
+import pytest
 
-from fubon_downloader import FubonStatementDownloader
+from fubon_downloader import FubonDownloadError, FubonStatementDownloader
 
 
 def test_fubon_output_name_converts_roc_period():
@@ -78,3 +81,42 @@ def test_fubon_download_validates_encrypted_pdf(tmp_path, monkeypatch):
     )
 
     assert output.exists()
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_fubon_login_retries_ocr_timeouts(tmp_path, monkeypatch, recover):
+    monkeypatch.setattr("fubon_downloader.shutil.which", lambda _: "/offline/tesseract")
+    downloader = FubonStatementDownloader("synthetic-id", "synthetic-birthday", tmp_path,
+                                          captcha_retries=2)
+    image = BytesIO()
+    Image.new("RGB", (4, 4), "white").save(image, "PNG")
+    captcha_calls = []
+    ocr_calls = []
+    login_calls = []
+
+    def fake_captcha():
+        captcha_calls.append(True)
+        return "offline-key", image.getvalue()
+
+    def fake_ocr(command, **kwargs):
+        ocr_calls.append(command)
+        if len(ocr_calls) == 1 or not recover:
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, stdout="1234", stderr="")
+
+    def fake_request(path, payload=None, **kwargs):
+        login_calls.append((path, payload))
+        return b'{"jwt": "offline-token"}'
+
+    monkeypatch.setattr(downloader, "_get_captcha", fake_captcha)
+    monkeypatch.setattr(downloader, "_request", fake_request)
+    monkeypatch.setattr("fubon_downloader.subprocess.run", fake_ocr)
+
+    if recover:
+        assert downloader._login("offline-serial") == {"jwt": "offline-token"}
+        assert login_calls[0][1]["captchaCode"] == "offline-key,1234"
+    else:
+        with pytest.raises(FubonDownloadError, match="驗證碼辨識逾時"):
+            downloader._login("offline-serial")
+        assert login_calls == []
+    assert len(captcha_calls) == 2

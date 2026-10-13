@@ -285,3 +285,88 @@ def test_history_retention_prunes_only_dated_old_records():
     now = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc).timestamp()
     assert prune_history_records(history, 365, now=now) == ["old"]
     assert set(history) == {"_uidvalidity", "invalid", "undated"}
+
+
+def statement_fetcher(monkeypatch, tmp_path, messages, history=None):
+    class Mail:
+        def uid(self, command, *args):
+            if command == "search":
+                return "OK", [" ".join(messages).encode()]
+            uids = args[0].split(",")
+            return "OK", [
+                (f"1 (UID {uid})".encode(), messages[uid].as_bytes())
+                for uid in uids
+            ]
+
+    fetcher = MailFetcher.__new__(MailFetcher)
+    fetcher.config = {"mail": {"local_filters": {"subjects": ["信用卡帳單"]}}}
+    fetcher.history = history or {}
+    fetcher.mail = Mail()
+    fetcher.download_dir = tmp_path
+    monkeypatch.setattr(fetcher, "connect", lambda: None)
+    monkeypatch.setattr(fetcher, "disconnect", lambda: None)
+    monkeypatch.setattr(fetcher, "save_history", lambda: None)
+    return fetcher
+
+
+def statement_message(*payloads):
+    message = EmailMessage()
+    message["Subject"] = "信用卡帳單"
+    message["From"] = "notice@example.com"
+    message["Date"] = "Tue, 01 Sep 2026 00:00:00 +0000"
+    message.set_content("Statement")
+    for payload in payloads:
+        message.add_attachment(payload, maintype="application", subtype="pdf", filename="statement.pdf")
+    return message
+
+
+def test_identically_named_attachments_from_distinct_emails_are_all_saved(monkeypatch, tmp_path):
+    second_message = statement_message(b"second")
+    second_message.replace_header("Date", "Wed, 02 Sep 2026 00:00:00 +0000")
+    fetcher = statement_fetcher(monkeypatch, tmp_path, {
+        "1": statement_message(b"first"), "2": second_message,
+    })
+    saved = {}
+    monkeypatch.setattr("mail_fetcher.write_pdf_atomic", lambda path, payload: saved.setdefault(path, payload))
+
+    assert fetcher.fetch_statements() == 2
+    assert set(saved.values()) == {b"first", b"second"}
+
+
+def test_same_email_attachment_filename_collision_preserves_both_payloads(monkeypatch, tmp_path):
+    fetcher = statement_fetcher(monkeypatch, tmp_path, {"1": statement_message(b"first", b"second")})
+    saved = {}
+    monkeypatch.setattr("mail_fetcher.write_pdf_atomic", lambda path, payload: saved.__setitem__(path, payload))
+
+    assert fetcher.fetch_statements() == 2
+    assert len(fetcher.history["1"]["attachments"]) == 2
+    assert set(saved.values()) == {b"first", b"second"}
+
+
+def test_legacy_selection_history_rescans_once_and_preserves_download_state(monkeypatch, tmp_path):
+    link = "https://fbmbill.taipeifubon.com.tw/client/pdf/abcdef123456"
+    legacy = {"attachments": ["prior.pdf"], "fubon_downloaded_links": [link]}
+    fetcher = statement_fetcher(monkeypatch, tmp_path, {"1": statement_message(b"pdf")}, {"1": legacy})
+    monkeypatch.setattr("mail_fetcher.write_pdf_atomic", lambda path, payload: None)
+
+    assert fetcher.fetch_statements() == 1
+    assert "prior.pdf" in fetcher.history["1"]["attachments"]
+    assert fetcher.history["1"]["fubon_downloaded_links"] == [link]
+    assert fetcher.fetch_statements() == 0
+
+
+def test_failed_selection_migration_preserves_history_for_retry(monkeypatch, tmp_path):
+    legacy = {"attachments": ["prior.pdf"]}
+    fetcher = statement_fetcher(monkeypatch, tmp_path, {"1": statement_message(b"pdf")}, {"1": legacy})
+    attempts = []
+    def fail_write(path, payload):
+        attempts.append(path)
+        raise OSError("synthetic write failure")
+    monkeypatch.setattr("mail_fetcher.write_pdf_atomic", fail_write)
+
+    assert fetcher.fetch_statements() == 0
+    assert len(attempts) == 1
+    assert fetcher.history["1"] == legacy
+    monkeypatch.setattr("mail_fetcher.write_pdf_atomic", lambda path, payload: None)
+    assert fetcher.fetch_statements() == 1
+    assert fetcher.fetch_statements() == 0

@@ -52,8 +52,96 @@ def test_send_document_includes_chat_and_file(monkeypatch):
     assert content_type.startswith("multipart/form-data;")
 
 
+@pytest.mark.parametrize("failure", ["invalid_bank", "exit_error", "timeout", "missing_current_report"])
+def test_failed_run_never_attaches_previous_results(monkeypatch, tmp_path, failure):
+    import io
+    import zipfile
+    from types import SimpleNamespace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    monkeypatch.setenv("REPORT_ENV", "")
+    monkeypatch.setenv("REPORT_BANKS", "unsupported-test-bank" if failure == "invalid_bank" else "")
+    (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "latest.json").write_text(json.dumps({
+        "run_id": "previous-run", "files": ["previous.json"], "balances": [{
+            "bank": "ctbc", "bank_name": "Previous bank", "status": "success",
+            "balance": "4321", "queried_at": "2000-01-01T00:00:00+08:00"}]}))
+    (output / "previous.json").write_text('{"previous_result": true}')
+
+    def run(*args, **kwargs):
+        assert failure != "invalid_bank"
+        if failure == "timeout":
+            raise report.subprocess.TimeoutExpired(args[0], 2400)
+        return SimpleNamespace(returncode=0 if failure == "missing_current_report" else 1)
+
+    messages, documents = [], []
+    monkeypatch.setattr(report.subprocess, "run", run)
+    monkeypatch.setattr(report, "request_telegram", lambda *args: messages.append(json.loads(args[2])))
+    monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
+    assert report.main() == 1
+    assert all("Previous bank" not in message["text"] for message in messages)
+    with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
+        assert set(archive.namelist()) == {"console.txt"}
+
+
+def test_corrupt_manifest_still_delivers_failure_log(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    monkeypatch.setenv("REPORT_ENV", "")
+    monkeypatch.setenv("REPORT_BANKS", "")
+    (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/latest.json").write_text("{corrupt")
+    monkeypatch.setattr(report.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1))
+    messages, documents = [], []
+    monkeypatch.setattr(report, "request_telegram", lambda *args: messages.append(args))
+    monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args))
+    assert report.main() == 1
+    assert messages and documents
+
+
+def test_successful_run_delivers_the_current_manifest(monkeypatch, tmp_path):
+    import io
+    import zipfile
+    from types import SimpleNamespace
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    monkeypatch.setenv("REPORT_ENV", "")
+    monkeypatch.setenv("REPORT_BANKS", "")
+    (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
+    (tmp_path / "output").mkdir()
+    run_ids = []
+
+    def run(*args, **kwargs):
+        run_id = kwargs["env"]["CREDITCARD_REPORT_RUN_ID"]
+        run_ids.append(run_id)
+        (tmp_path / "output/latest.json").write_text(json.dumps({
+            "run_id": run_id, "generated_at": "2026-10-13T00:00:00+00:00",
+            "files": [], "balances": []}))
+        return SimpleNamespace(returncode=0)
+
+    messages, documents = [], []
+    monkeypatch.setattr(report.subprocess, "run", run)
+    monkeypatch.setattr(report, "request_telegram", lambda *args: messages.append(json.loads(args[2])))
+    monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
+    assert report.main() == 0
+    assert "執行完成" in messages[0]["text"]
+    with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
+        assert json.loads(archive.read("latest.json"))["run_id"] == run_ids[0]
+
+
 @pytest.mark.parametrize("current_diagnostics", [True, False])
-def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path, capsys, current_diagnostics):
+@pytest.mark.parametrize("current_run_diagnostics", [True, False])
+def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch, tmp_path, capsys, current_diagnostics, current_run_diagnostics):
     import io
     import zipfile
     from types import SimpleNamespace
@@ -81,6 +169,13 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
 
     def run(*args, **kwargs):
         assert args[0] == [report.sys.executable, "main.py", "--bank", "chb", "--bank", "esun"]
+        run_id = kwargs["env"]["CREDITCARD_REPORT_RUN_ID"]
+        manifest = json.loads((output / "latest.json").read_text())
+        manifest.update(run_id=run_id, generated_at="2026-10-06T19:11:00+08:00")
+        (output / "latest.json").write_text(json.dumps(manifest))
+        private = json.loads((output / "private_bank_diagnostics.json").read_text())
+        private["run_id"] = run_id if current_run_diagnostics else "previous-run"
+        (output / "private_bank_diagnostics.json").write_text(json.dumps(private))
         kwargs["stdout"].write("fontTools is required\n帳單完成 private-password".encode())
         return SimpleNamespace(returncode=1)
 
@@ -99,7 +194,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     assert "private-bank-notice" not in messages[0]["text"]
     with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
         expected = {"console.txt", "latest.json", "statement.json"}
-        if current_diagnostics:
+        if current_diagnostics and current_run_diagnostics:
             expected.add("private_bank_diagnostics.json")
             private = archive.read("private_bank_diagnostics.json")
             assert b"private-bank-notice" in private

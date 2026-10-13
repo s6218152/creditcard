@@ -25,3 +25,15 @@ def test_zero_retention_disables_cleanup(tmp_path):
     os.utime(target, (1, 1))
     assert prune_old_files(tmp_path, ("*.pdf",), 0, now=40 * 86400) == []
     assert target.exists()
+
+
+def test_retention_never_follows_matching_symlink(tmp_path):
+    target = tmp_path / "keep.txt"
+    target.write_text("data")
+    os.utime(target, (1, 1))
+    alias = tmp_path / "old.pdf"
+    alias.symlink_to(target)
+
+    assert prune_old_files(tmp_path, ("*.pdf",), 30, now=40 * 86400) == []
+    assert target.exists()
+    assert alias.is_symlink()

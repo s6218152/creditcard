@@ -276,6 +276,78 @@ def test_pipeline_prints_balance_after_cards_and_saves_it(monkeypatch, tmp_path,
     assert report["balances"][0]["balance"] == "22542"
 
 
+def test_pipeline_initializes_current_manifest_before_download_failure(monkeypatch, tmp_path):
+    import json
+    import pytest
+    import yaml
+    import main
+
+    config = yaml.safe_load(Path("config.yaml").read_text())
+    config["fubon"]["enabled"] = False
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True))
+    output = tmp_path / config["storage"]["output_dir"]
+    output.mkdir()
+    (output / "latest.json").write_text(json.dumps({"run_id": "previous-run", "files": ["old.json"]}))
+
+    def fail(path):
+        raise RuntimeError("synthetic startup failure")
+
+    monkeypatch.setattr(main, "MailFetcher", fail)
+    with pytest.raises(RuntimeError, match="synthetic startup failure"):
+        main.run_pipeline(config_path, interactive=False, run_id="current-run")
+    manifest = json.loads((output / "latest.json").read_text())
+    assert manifest["run_id"] == "current-run"
+    assert manifest["files"] == [] and manifest["balances"] == []
+    assert manifest["generated_at"]
+
+
+def test_pipeline_without_statements_has_fresh_completed_manifest(monkeypatch, tmp_path):
+    from datetime import datetime
+    import json
+    import yaml
+    import main
+
+    config = yaml.safe_load(Path("config.yaml").read_text())
+    config["fubon"]["enabled"] = False
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config, allow_unicode=True))
+    monkeypatch.setattr(main, "MailFetcher", lambda path: type("Fetcher", (), {
+        "history": {}, "fetch_statements": lambda self: 0})())
+    assert main.run_pipeline(config_path, interactive=False, run_id="empty-current-run")
+    manifest = json.loads((tmp_path / config["storage"]["output_dir"] / "latest.json").read_text())
+    assert manifest["run_id"] == "empty-current-run"
+    assert manifest["pipeline_status"] == "success"
+    assert manifest["files"] == [] and manifest["balances"] == []
+    assert datetime.fromisoformat(manifest["generated_at"]).tzinfo is not None
+
+
+def test_old_parser_cache_is_reparsed_with_correct_merchant_amount(tmp_path):
+    import hashlib
+    import json
+    from main import process_single_pdf
+    from parsers.engine import PARSER_ENGINE_VERSION
+
+    pdf = tmp_path / "generic.pdf"
+    pdf.write_bytes(b"synthetic-pdf-content")
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "generic_parsed.json").write_text(json.dumps({
+        "details": [{"description": "PChome", "amount": 24}],
+        "metadata": {"status": "success", "parser_version": "22",
+                     "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest()},
+    }))
+
+    class Processor:
+        def extract_text(self, *args, **kwargs):
+            return "本期應繳總金額 1,234\n繳款截止日 2026/10/20\n消費明細\n09/01 09/03 PChome 24h購物 1,234"
+
+    result = process_single_pdf(pdf, Processor(), output)
+    assert result["details"][0]["amount"] == 1234
+    assert result["details"][0]["description"] == "PChome 24h購物"
+    assert result["metadata"]["parser_version"] == PARSER_ENGINE_VERSION
+
+
 def test_current_deposit_balance_is_identified_under_bank_due_date(capsys):
     from main import print_statement_summaries
     print_statement_summaries([("彰化銀行", {"metadata": {"status": "success"},

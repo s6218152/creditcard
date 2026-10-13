@@ -314,7 +314,11 @@ def parse_hncb_deposit_rows(rows):
     balances = []
     accounts = set()
     for cells in rows:
-        if len(cells) != 11 or cells[1].strip() not in ("活存", "活儲") or cells[2].strip() != "新台幣":
+        if len(cells) < 2 or cells[1].strip() not in ("活存", "活儲"):
+            continue
+        if len(cells) != 11:
+            raise ValueError("華南活期存款資料列尚未完整載入")
+        if cells[2].strip() != "新台幣":
             continue
         account = re.sub(r"\s", "", cells[0])
         if not account or account in accounts:
@@ -334,8 +338,8 @@ def read_hncb_twd_balance(page):
         tables = frame.locator("table:visible")
         for index in range(tables.count()):
             table = tables.nth(index)
-            rows = table.locator(":scope > tbody > tr").evaluate_all("""rows => rows.map(row =>
-                Array.from(row.children).filter(cell => cell.tagName === 'TD' && cell.getClientRects().length)
+            rows = table.locator(":scope > tbody > tr").evaluate_all("""rows => rows.filter(row => row.getClientRects().length).map(row =>
+                Array.from(row.children).filter(cell => cell.tagName === 'TD')
                 .map(cell => cell.innerText.trim())).filter(cells => cells.length)""")
             if (len(rows) >= 3 and rows[0][:4] == ["帳號", "類別", "幣別", "帳上餘額"] and
                     rows[1] == ["原幣", "折合新台幣"]):

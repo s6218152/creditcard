@@ -6,10 +6,13 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 import json
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 
 from playwright.sync_api import Error as PlaywrightError
 from bank_specs import CAPTCHA_IMAGES, CaptchaSpec
@@ -17,6 +20,10 @@ from bank_specs import CAPTCHA_IMAGES, CaptchaSpec
 
 MIN_CHARACTER_CONFIDENCE = 0.95
 MIN_INDEPENDENT_CONFIDENCE = 0.50
+WORKER_TIMEOUT = 20
+MAX_IMAGE_BYTES = 512_000
+MAX_REQUEST_BYTES = 700_000
+MAX_RESPONSE_BYTES = 4096
 
 
 class CaptchaError(ValueError):
@@ -184,17 +191,14 @@ def _recognize_in_worker(image, length, alphabet="digits", consensus_fallback=Fa
     return _worker_result(image, length, alphabet, consensus_fallback, all_model_consensus).text
 
 
-def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False):
-    if not image or len(image) > 512_000 or length not in (4, 5, 6) or alphabet not in ("digits", "alnum"):
-        return Recognition(None, "invalid_image")
+def _valid_worker_input(image, length, alphabet):
+    return (isinstance(image, (bytes, bytearray)) and 0 < len(image) <= MAX_IMAGE_BYTES and
+            length in (4, 5, 6) and alphabet in ("digits", "alnum"))
+
+
+def _decode_worker_response(raw, length, alphabet, consensus_fallback, all_model_consensus):
     try:
-        # Isolate native OCR threads from Playwright's browser event loop.
-        result = subprocess.run([sys.executable, str(Path(__file__).resolve()), str(length), alphabet,
-                                 "all-consensus" if all_model_consensus else "consensus" if consensus_fallback else "strict"],
-                                input=image, capture_output=True, timeout=20)
-        if result.returncode:
-            return Recognition(None, "worker_crashed")
-        payload = json.loads(result.stdout.decode("ascii"))
+        payload = json.loads(raw.decode("ascii"))
         text, reason = payload["text"], payload["reason"]
         allowed = "[0-9]" if alphabet == "digits" else "[A-Za-z0-9]"
         if text is None and reason in REASONS:
@@ -205,7 +209,96 @@ def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=Fals
             if reason != "strong_agreement" and not consensus_fallback:
                 return Recognition(None, "invalid_response")
             return Recognition(text, reason)
-        return Recognition(None, "invalid_response")
+    except (UnicodeDecodeError, ValueError, KeyError, TypeError):
+        pass
+    return Recognition(None, "invalid_response")
+
+
+class CaptchaWorker:
+    """Reuse isolated OCR models within one CAPTCHA flow; never persist images."""
+
+    def __init__(self):
+        self._process = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def close(self):
+        process, self._process = self._process, None
+        if process is None:
+            return
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        process.stdin.close()
+        process.stdout.close()
+
+    def recognize(self, image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False):
+        if not _valid_worker_input(image, length, alphabet):
+            return Recognition(None, "invalid_image")
+        deadline = time.monotonic() + WORKER_TIMEOUT
+        if self._process is not None and self._process.poll() is not None:
+            self.close()
+        try:
+            if self._process is None:
+                self._process = subprocess.Popen(
+                    [sys.executable, str(Path(__file__).resolve()), "--serve"],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except OSError:
+            return Recognition(None, "worker_unavailable")
+        process = self._process
+        request = json.dumps({"image": base64.b64encode(image).decode("ascii"), "length": length,
+                              "alphabet": alphabet, "consensus_fallback": consensus_fallback,
+                              "all_model_consensus": all_model_consensus}).encode("ascii") + b"\n"
+        responses = queue.Queue(maxsize=1)
+
+        def exchange():
+            try:
+                process.stdin.write(request)
+                process.stdin.flush()
+                responses.put(process.stdout.readline(MAX_RESPONSE_BYTES + 1))
+            except (OSError, ValueError):
+                responses.put(b"")
+
+        thread = threading.Thread(target=exchange, daemon=True)
+        thread.start()
+        try:
+            raw = responses.get(timeout=max(0, deadline - time.monotonic()))
+        except queue.Empty:
+            self.close()
+            thread.join()
+            return Recognition(None, "worker_timeout")
+        except BaseException:
+            self.close()
+            thread.join()
+            raise
+        thread.join()
+        if not raw:
+            self.close()
+            return Recognition(None, "worker_crashed")
+        result = _decode_worker_response(raw, length, alphabet, consensus_fallback, all_model_consensus)
+        if len(raw) > MAX_RESPONSE_BYTES or not raw.endswith(b"\n") or result.reason == "invalid_response":
+            self.close()
+            return Recognition(None, "invalid_response")
+        return result
+
+
+def run_captcha_worker(image, length, alphabet="digits", consensus_fallback=False, all_model_consensus=False, worker=None):
+    if not _valid_worker_input(image, length, alphabet):
+        return Recognition(None, "invalid_image")
+    if worker is not None:
+        return worker.recognize(image, length, alphabet, consensus_fallback, all_model_consensus)
+    try:
+        # Isolate native OCR threads from Playwright's browser event loop.
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve()), str(length), alphabet,
+                                 "all-consensus" if all_model_consensus else "consensus" if consensus_fallback else "strict"],
+                                input=image, capture_output=True, timeout=WORKER_TIMEOUT)
+        if result.returncode:
+            return Recognition(None, "worker_crashed")
+        return _decode_worker_response(result.stdout, length, alphabet, consensus_fallback, all_model_consensus)
     except subprocess.TimeoutExpired:
         return Recognition(None, "worker_timeout")
     except OSError:
@@ -298,7 +391,7 @@ def _image_bytes(images, spec):
     return sources, output.getvalue()
 
 
-def _fill_once(page, frame, spec, field, is_official):
+def _fill_once(page, frame, spec, field, is_official, worker=None):
     images = frame.locator(spec.image + ":visible")
     image_count = images.count()
     if image_count == 0:
@@ -313,7 +406,7 @@ def _fill_once(page, frame, spec, field, is_official):
         return False
     sources, image = _image_bytes(images, spec)
     result = run_captcha_worker(image, spec.length, spec.alphabet, spec.consensus_fallback,
-                                spec.all_model_consensus)
+                                spec.all_model_consensus, worker)
     if not result.text:
         raise CaptchaError(REASONS[result.reason], "captcha_ocr_unavailable" if result.reason in
                            ("dependency_missing", "ocr_error", "worker_crashed", "worker_timeout", "worker_unavailable", "invalid_response")
@@ -339,6 +432,11 @@ def try_fill_captcha(page, frame, bank, field, is_official):
     if importlib.util.find_spec("ddddocr") is None:
         raise CaptchaError(f"目前 Python（{sys.executable}）缺少 ddddocr，請安裝 requirements.lock", "captcha_ocr_unavailable")
     last_error = CaptchaError("圖片在辨識期間變更或欄位已有其他輸入")
+    with CaptchaWorker() as worker:
+        return _try_fill_captcha(page, frame, bank, field, is_official, spec, worker, last_error)
+
+
+def _try_fill_captcha(page, frame, bank, field, is_official, spec, worker, last_error):
     for attempt in range(3):
         if not is_official(page.url) or not is_official(frame.url) or field.input_value():
             return False
@@ -346,7 +444,7 @@ def try_fill_captcha(page, frame, bank, field, is_official):
             print(f"[{bank}] 正在自動辨識驗證碼（第 {attempt + 1}/3 張，OCR 最多 20 秒）…", flush=True)
             # SPA images can arrive after the input becomes visible.
             page.wait_for_timeout(500)
-            if _fill_once(page, frame, spec, field, is_official):
+            if _fill_once(page, frame, spec, field, is_official, worker):
                 return True
         except CaptchaError as error:
             last_error = error
@@ -368,7 +466,31 @@ def try_fill_captcha(page, frame, bank, field, is_official):
     raise last_error
 
 
+def _serve_worker():
+    """Bounded, in-memory requests let the process-local model cache survive."""
+    while raw := sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1):
+        if len(raw) > MAX_REQUEST_BYTES or not raw.endswith(b"\n"):
+            raise SystemExit(2)
+        try:
+            request = json.loads(raw.decode("ascii"))
+            image = base64.b64decode(request["image"], validate=True)
+            length, alphabet = request["length"], request["alphabet"]
+            consensus, all_consensus = request["consensus_fallback"], request["all_model_consensus"]
+            if (not _valid_worker_input(image, length, alphabet) or
+                    not isinstance(consensus, bool) or not isinstance(all_consensus, bool)):
+                raise ValueError("invalid request")
+        except (UnicodeDecodeError, ValueError, KeyError, TypeError):
+            raise SystemExit(2)
+        result = _worker_result(image, length, alphabet, consensus, all_consensus)
+        del image, request, raw
+        sys.stdout.write(json.dumps({"text": result.text, "reason": result.reason}) + "\n")
+        sys.stdout.flush()
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--serve"]:
+        _serve_worker()
+        raise SystemExit(0)
     if (len(sys.argv) != 4 or sys.argv[1] not in ("4", "5", "6") or
             sys.argv[2] not in ("digits", "alnum") or sys.argv[3] not in ("strict", "consensus", "all-consensus")):
         raise SystemExit(2)

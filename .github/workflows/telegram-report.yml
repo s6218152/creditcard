@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.lock
       - name: Install dependencies
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -31,7 +33,7 @@ jobs:
           if ! command -v tesseract >/dev/null; then
             brew install tesseract
           fi
-          python -m pip install -r requirements.txt
+          python -m pip install --disable-pip-version-check -r requirements.lock
       - name: Run pipeline and deliver report
         env:
           TZ: Asia/Taipei

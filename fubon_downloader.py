@@ -85,16 +85,19 @@ class FubonStatementDownloader:
                 output.save(cleaned)
 
                 for page_mode in (7, 8, 13):
-                    process = subprocess.run(
-                        [
-                            "tesseract", str(cleaned), "stdout", "--psm", str(page_mode),
-                            "-c", "tessedit_char_whitelist=0123456789",
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=15,
-                        check=False,
-                    )
+                    try:
+                        process = subprocess.run(
+                            [
+                                "tesseract", str(cleaned), "stdout", "--psm", str(page_mode),
+                                "-c", "tessedit_char_whitelist=0123456789",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
+                            check=False,
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        raise FubonDownloadError("驗證碼辨識逾時") from exc
                     code = re.sub(r"\D", "", process.stdout)
                     if process.returncode == 0 and len(code) == 4:
                         candidates.append(code)
