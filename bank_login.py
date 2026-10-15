@@ -153,10 +153,11 @@ def dismiss_login_notice(page, frame, bank, is_official, *, wait_for_notice=Fals
         if notice.count() == 1:
             text = notice.inner_text(timeout=1000)
             if "維護公告" in text and "系統維護作業" in text:
-                acknowledge = notice.get_by_text("我知道了", exact=True)
+                acknowledge = notice.get_by_text(re.compile(r"^(?:我知道了|I got it)$"))
                 if acknowledge.count() == 1 and acknowledge.is_visible():
                     acknowledge.click(timeout=5000)
                     notice.wait_for(state="hidden", timeout=5000)
+                    return True
         return
     if bank == "cathay":
         notice = frame.locator('#divSystemLoginMsgList[role="dialog"]:visible')

@@ -97,13 +97,16 @@ def test_shanghai_uses_official_traditional_chinese_choice_before_login(page, la
     load_mock_page(page, "https://ebank.scsb.com.tw/", f'''
         <button type="button" onclick="document.getElementById('choice').style.display='block'">EN</button>
         <a id="choice" data-lang-locale="zh-TW" style="display:none" onclick="
-          document.getElementById('submit').innerText='登入';this.style.display='none'">繁中</a>
+          document.getElementById('submit').innerText='登入';setTimeout(()=>location.search='?locale=zh-TW',100)">繁中</a>
         <a data-lang-locale="zh-TW" style="display:none">繁體中文</a>
         <input id="userId"><input id="idNumber"><input id="pppd">
         <button id="submit" type="submit">{label}</button>
+        <script>if(location.search)document.getElementById('submit').innerText='登入';</script>
     ''')
     prepare_entry(page, "shanghai")
     assert page.locator('#submit').inner_text() == "登入"
+    if label == "Log in":
+        assert "locale=zh-TW" in page.url
 
 
 @pytest.mark.parametrize("timer,expected", [(True, True), (False, False)])

@@ -31,7 +31,7 @@ NOTICES = {
         '<a>台新Richart會員條款</a><div class="_popup_footer"><button>立即開通</button>'
         '<button>之後提醒我</button></div></div>', '之後提醒我'),
     'cathay': ('https://www.cathaybk.com.tw/MyBank/Home',
-        '<div role="dialog" class="chakra-modal__content"><p>您尚未啟用「登入兩步驟」</p>'
+        '<div role="alertdialog" class="chakra-modal__content-container"><p>您尚未啟用「登入兩步驟」</p>'
         '<footer class="chakra-modal__footer"><button>立即啟用</button>'
         '<button>暫時不用</button></footer></div>', '暫時不用'),
 }
@@ -44,7 +44,7 @@ def load(page, url, body):
         document.addEventListener('click', e => {
             if (!e.target.matches('button,a')) return;
             e.preventDefault(); window.clicked.push(e.target.textContent);
-            e.target.closest('.modality-modal,.modal,._popup,[role=dialog]').remove();
+            e.target.closest('.modality-modal,.modal,._popup,[role=dialog],.chakra-modal__content-container').remove();
         });</script>'''))
     page.goto(url)
 
@@ -97,15 +97,17 @@ def test_unknown_overlay_keeps_navigation_error_visible(page, monkeypatch):
 
 
 @pytest.mark.parametrize('known', [True, False])
-def test_shanghai_acknowledges_only_scoped_maintenance_announcement(page, known):
+@pytest.mark.parametrize('acknowledge', ['我知道了', 'I got it'])
+def test_shanghai_acknowledges_only_scoped_maintenance_announcement(page, known, acknowledge):
     url = 'https://ebank.scsb.com.tw/'
     body = '<div class="modal custom-modal" role="dialog"><h2>網路銀行 10/14、10/15 維護公告</h2>' \
            '<p>本行為提供更優質的服務，將進行系統維護作業。</p><button>我知道了</button></div>'
     if not known:
         body = body.replace('維護公告', '尚未確認的條款')
+    body = body.replace('我知道了', acknowledge)
     load(page, url, body)
     dismiss_login_notice(page, page.main_frame, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
-    assert page.evaluate('window.clicked') == (['我知道了'] if known else [])
+    assert page.evaluate('window.clicked') == ([acknowledge] if known else [])
 
 
 @pytest.mark.parametrize('key', list(NOTICES))
@@ -198,3 +200,37 @@ def test_login_form_wait_stops_immediately_on_foreign_redirect():
         bank_login.wait_for_login_form(page, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
     assert caught.value.code == 'untrusted_url'
     assert waits == [250]
+
+
+@pytest.mark.parametrize('stage', ['before_language', 'after_menu'])
+def test_shanghai_english_announcement_and_delayed_language_reload(page, stage):
+    from manual_bank_balance import prepare_entry
+    notice = '<div class="modal custom-modal" role="dialog" style="position:fixed;inset:0;background:white;z-index:10">' \
+             '<p>網路銀行維護公告：系統維護作業</p>' \
+             '<button onclick="this.parentElement.remove()">I got it</button></div>'
+    import json
+    markup = '<button role="button" onclick="document.querySelector(\'#choice\').style.display=\'block\';' \
+             'if(window.lateNotice) {document.body.insertAdjacentHTML(\'beforeend\',window.lateNotice);window.lateNotice=null;}">EN</button>' \
+             '<a id="choice" data-lang-locale="zh-TW" style="display:none" onclick="' \
+             'document.querySelector(\'#submit\').textContent=\'登入\';setTimeout(()=>location.search=\'?lang=zh-TW\',200)">繁中</a>' \
+             '<input id="userId"><input id="idNumber"><input id="pppd">' \
+             '<button id="submit" type="submit">Log in</button>'
+    script = '<script>window.lateNotice=' + (json.dumps(notice) if stage == 'after_menu' else 'null') + ';' \
+             'if(location.search){document.querySelector("#submit").textContent="登入";window.lateNotice=null;}' \
+             '</script>'
+    if stage == 'before_language':
+        script += '<script>if(!location.search)document.body.insertAdjacentHTML("beforeend",' + json.dumps(notice) + ');</script>'
+    page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8', body=markup + script))
+    page.goto('https://ebank.scsb.com.tw/')
+    prepare_entry(page, 'shanghai')
+    assert 'lang=zh-TW' in page.url
+    assert page.locator('#submit').inner_text() == '登入'
+    assert page.locator('#userId').input_value() == ''
+    assert page.locator('#pppd').input_value() == ''
+
+
+def test_cathay_notice_is_scoped_by_visible_container_with_dialog_role(page):
+    url, html, _ = NOTICES['cathay']
+    load(page, url, html.replace('alertdialog', 'dialog'))
+    assert bank.dismiss_balance_notice(page, 'cathay')
+    assert page.evaluate('window.clicked') == ['暫時不用']

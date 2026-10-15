@@ -12,7 +12,7 @@ from playwright.sync_api import Error as PlaywrightError, sync_playwright
 from bank_registry import AUTO_BANKS
 from chrome_session import system_chrome_context
 from bank_diagnostics import diagnostic_chrome_context, has_verification_challenge
-from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog, is_frame_transition_error
+from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog, is_frame_transition_error, dismiss_login_notice
 from bank_captcha import CAPTCHA_IMAGES
 from ctbc_balance import parse_balance_text
 
@@ -597,19 +597,35 @@ def _click_balance_navigation(page, bank, visited):
 def prepare_entry(page, bank):
     if bank == "shanghai" and is_bank_url(page.url, bank):
         page.locator(LOGIN_FORMS[bank].submit + ":visible").wait_for(timeout=20_000)
-        if not is_bank_url(page.url, bank):
-            raise BankQueryError("上海登入頁已離開官方網址，未送出帳密", "untrusted_url")
-        if page.locator('button[type="submit"]:text-is("Log in"):visible').count() == 1:
-            language = page.get_by_role("button", name="EN", exact=True)
-            if language.count() != 1:
-                raise BankQueryError("上海登入語言選單不唯一，未送出帳密", "login_language_unavailable")
-            language.click(timeout=5000)
-            chinese = page.locator('a[data-lang-locale="zh-TW"]:visible')
-            if chinese.count() != 1:
-                raise BankQueryError("上海繁中語言選項不唯一，未送出帳密", "login_language_unavailable")
-            chinese.click(timeout=5000)
-            page.locator('button[type="submit"]:text-is("登入"):visible').wait_for(timeout=10_000)
-        return
+        official = lambda url: is_bank_url(url, bank)
+        for attempt in range(3):
+            if not official(page.url):
+                raise BankQueryError("上海登入頁已離開官方網址，未送出帳密", "untrusted_url")
+            if page.locator('button[type="submit"]:text-is("Log in"):visible').count() == 0:
+                return
+            dismiss_login_notice(page, page.main_frame, bank, official, wait_for_notice=(attempt == 0))
+            try:
+                chinese = page.locator('a[data-lang-locale="zh-TW"]:visible')
+                if chinese.count() == 0:
+                    language = page.get_by_role("button", name="EN", exact=True)
+                    if language.count() != 1:
+                        raise BankQueryError("上海登入語言選單不唯一，未送出帳密", "login_language_unavailable")
+                    language.click(timeout=5000)
+                if dismiss_login_notice(page, page.main_frame, bank, official):
+                    continue
+                chinese.first.wait_for(state="visible", timeout=5000)
+                if chinese.count() != 1:
+                    raise BankQueryError("上海繁中語言選項不唯一，未送出帳密", "login_language_unavailable")
+                # The bank translates labels before reloading the document.
+                # Wait for that reload so credentials cannot be cleared by it.
+                with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
+                    chinese.click(timeout=5000)
+                page.locator('button[type="submit"]:text-is("登入"):visible').wait_for(timeout=20_000)
+                return
+            except PlaywrightError:
+                if not dismiss_login_notice(page, page.main_frame, bank, official):
+                    raise
+        raise BankQueryError("上海公告持續遮擋語言切換，未送出帳密", "login_language_unavailable")
     if bank == "ubot" and is_bank_url(page.url, bank):
         # The homepage includes an off-screen form. Opening the drawer also
         # requests its CAPTCHA; filling that hidden form leaves the image blank.
@@ -676,7 +692,8 @@ def dismiss_balance_notice(page, bank):
                 notice = action.locator(
                     "xpath=ancestor::*[contains(@class, '_popup') and contains(., '台新Richart會員條款')][1]")
             elif bank == "cathay":
-                notice = frame.get_by_role("dialog").filter(has_text="您尚未啟用「登入兩步驟」")
+                notice = frame.locator('.chakra-modal__content-container:visible').filter(
+                    has_text="您尚未啟用「登入兩步驟」")
                 action = notice.get_by_text("暫時不用", exact=True)
             else:
                 continue
