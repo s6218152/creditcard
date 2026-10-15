@@ -114,7 +114,8 @@ def test_successful_run_delivers_the_current_manifest(monkeypatch, tmp_path):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    # A short numeric secret can randomly match and redact part of a UUID.
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "test-chat-id")
     monkeypatch.setenv("REPORT_ENV", "")
     monkeypatch.setenv("REPORT_BANKS", "")
     (tmp_path / "config.yaml").write_text("storage:\n  output_dir: output\n")
