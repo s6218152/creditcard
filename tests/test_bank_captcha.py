@@ -235,18 +235,30 @@ def test_alphanumeric_banks_use_exact_independent_case_with_model_corroboration(
                                              spec.consensus_fallback, spec.all_model_consensus) == (reading if accepted else None)
 
 
-@pytest.mark.parametrize("alternate, confidence, independent, accepted", [
-    ("abCD", 0.7, "ABCD", True),
-    ("ABCE", 0.999, "ABCD", False),
-    ("ABCD", 0.999, "ABCE", False),
-    ("ABCD", 0.999, None, False),
-    ("ABCD", 0.4, "ABCD", False),
+@pytest.mark.parametrize("alternate, confidence, independent, expected_reason", [
+    ("abCD", 0.7, "ABCD", "three_model_consensus"),
+    ("ABCE", 0.999, "ABCD", "model_disagreement"),
+    ("ABCD", 0.999, "ABCE", "independent_ocr_unconfirmed"),
+    ("ABCD", 0.999, None, "independent_ocr_unconfirmed"),
+    ("ABCD", 0.4, "ABCD", "invalid_format"),
 ])
-def test_first_bank_requires_all_three_models_even_with_strong_predictions(monkeypatch, alternate, confidence, independent, accepted):
+def test_first_bank_requires_all_three_models_even_with_strong_predictions(monkeypatch, alternate, confidence, independent, expected_reason):
     monkeypatch.setattr(bank_captcha, "_model", lambda beta: SimpleNamespace(
         classification=lambda *a, **kw: prediction(alternate if beta else "ABCD", confidence)))
     monkeypatch.setattr(bank_captcha, "_tesseract_text", lambda image: independent)
     spec = bank_captcha.CAPTCHA_IMAGES["first_bank"]
     result = bank_captcha._worker_result(b"image", spec.length, spec.alphabet,
                                         spec.consensus_fallback, spec.all_model_consensus)
-    assert result.text == (independent if accepted else None)
+    assert result.text == (independent if expected_reason == "three_model_consensus" else None)
+    assert result.reason == expected_reason
+
+
+def test_first_bank_low_confidence_is_reported_before_independent_ocr(monkeypatch):
+    monkeypatch.setattr(bank_captcha, '_model', lambda beta: SimpleNamespace(
+        classification=lambda *a, **kw: prediction('ABCD')))
+    monkeypatch.setattr(bank_captcha, '_decode_result', lambda *a: ('ABCD', [0.4] * 4))
+    calls = []
+    monkeypatch.setattr(bank_captcha, '_tesseract_text', lambda image: calls.append(image))
+    result = bank_captcha._worker_result(b'image', 4, 'alnum', True, True)
+    assert result == bank_captcha.Recognition(None, 'model_low_confidence')
+    assert calls == []

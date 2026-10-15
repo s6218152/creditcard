@@ -43,6 +43,8 @@ REASONS = {
     "invalid_format": "辨識文字的長度或字元格式不符",
     "model_disagreement": "兩個 OCR 模型結果不同",
     "low_confidence": "辨識信心不足，第三個 OCR 也未一致確認",
+    "model_low_confidence": "OCR 字元辨識信心不足；尚未進行第三個 OCR 確認",
+    "independent_ocr_unconfirmed": "前兩個 OCR 已一致，但第三個 OCR 未能確認",
     "dependency_missing": "OCR 相依套件缺漏",
     "ocr_error": "OCR 模型執行失敗",
     "worker_crashed": "OCR 程序異常結束",
@@ -150,11 +152,11 @@ def _worker_result(image, length, alphabet="digits", consensus_fallback=False, a
             if results[0][0].casefold() != results[1][0].casefold():
                 return Recognition(None, "model_disagreement")
             if any(min(result[1], default=0) < MIN_INDEPENDENT_CONFIDENCE for result in results):
-                return Recognition(None, "low_confidence")
+                return Recognition(None, "model_low_confidence")
             independent = _tesseract_text(image)
             if independent and independent.casefold() == results[0][0].casefold():
                 return Recognition(independent, "three_model_consensus")
-            return Recognition(None, "low_confidence")
+            return Recognition(None, "independent_ocr_unconfirmed")
         if consensus_fallback and (not all(results) or results[0][0] != results[1][0]):
             candidates = {result[0] for result in results if result and
                           min(result[1], default=0) >= MIN_INDEPENDENT_CONFIDENCE}
