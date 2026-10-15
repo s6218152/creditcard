@@ -276,3 +276,31 @@ def test_cathay_securities_maintenance_uses_only_remind_later(page, variant):
     load(page, url, html)
     assert bank.dismiss_balance_notice(page, 'cathay') is (variant == 'known')
     assert page.evaluate('window.clicked') == (['下次再提醒'] if variant == 'known' else [])
+
+
+def test_disappearing_login_notice_does_not_abort_logged_in_page(page, monkeypatch):
+    from playwright.sync_api import Locator
+    load(page, NOTICES['cathay'][0], '<a href="/logout">登出</a><div role="alert">資料載入中</div>')
+    original = Locator.is_visible
+    def disappears_after_visibility_check(locator, **kwargs):
+        visible = original(locator, **kwargs)
+        if visible and locator.get_attribute('role') == 'alert':
+            # Model a SPA removing its notice between separate browser calls.
+            locator.evaluate('e => e.remove()')
+        return visible
+    monkeypatch.setattr(Locator, 'is_visible', disappears_after_visibility_check)
+    bank_login.check_login_error(page, lambda url: bank.is_bank_url(url, 'cathay'))
+
+
+@pytest.mark.parametrize('message, code', [
+    ('驗證碼錯誤', 'captcha_rejected'),
+    ('密碼不正確', 'credentials_rejected'),
+    ('帳號已鎖定', 'account_locked'),
+])
+def test_visible_login_errors_still_stop_query_amid_other_notices(page, message, code):
+    load(page, NOTICES['cathay'][0],
+         '<div role="alert" style="display:none">登入失敗</div>'
+         '<div role="alert">系統維護公告</div><div role="alert">' + message + '</div>')
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.check_login_error(page, lambda url: bank.is_bank_url(url, 'cathay'))
+    assert caught.value.code == code

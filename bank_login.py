@@ -126,12 +126,10 @@ def _check_login_error(page, is_official):
     for frame in page.frames:
         if not is_official(frame.url):
             continue
-        dialogs = frame.locator('[role="alert"], [role="dialog"], .error-message, .alert-danger, .errorMsg, .login-error, .swal2-popup, .ui-dialog, .modal.show, .pop-hint, [class*="Pure__StatusBar-"]')
-        for index in range(dialogs.count()):
-            dialog = dialogs.nth(index)
-            if not dialog.is_visible():
-                continue
-            text = dialog.inner_text(timeout=1000)
+        dialogs = frame.locator(':is([role="alert"], [role="dialog"], .error-message, .alert-danger, .errorMsg, .login-error, .swal2-popup, .ui-dialog, .modal.show, .pop-hint, [class*="Pure__StatusBar-"]):visible')
+        # SPA notices can disappear or reorder between count/visibility/text
+        # calls. Read the currently visible notices without waiting on old indices.
+        for text in dialogs.all_inner_texts():
             if re.search(r"(?:圖形)?驗證碼.{0,12}(?:錯誤|不符|不正確|無效)", text):
                 raise BankQueryError("銀行回覆圖形驗證碼錯誤；已停止，不會自動重送登入", "captcha_rejected")
             if re.search(r"登入失敗|密碼.{0,10}(?:錯誤|不符|不正確|無效)|使用者.{0,10}(?:錯誤|不符|無效)|帳號.{0,10}(?:錯誤|不符|無效)", text):

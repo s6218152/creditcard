@@ -27,7 +27,7 @@ def test_bank_polling_tolerates_only_replaced_frames(message, transient):
     def count():
         raise error
     frame = SimpleNamespace(url="https://www.chb.com.tw/", locator=lambda css:
-                            SimpleNamespace(count=count), get_by_text=lambda *a, **kw:
+                            SimpleNamespace(count=count, all_inner_texts=count), get_by_text=lambda *a, **kw:
                             SimpleNamespace(count=count))
     page = SimpleNamespace(url=frame.url, frames=[frame])
     for call in (lambda: bank_login.check_login_error(page, lambda url: True),
@@ -225,10 +225,10 @@ def test_first_bank_clicks_only_valid_official_image_map(monkeypatch, coords):
 @pytest.mark.parametrize("visible", [True, False])
 def test_dbs_invalid_credentials_status_is_reported_only_when_visible(visible):
     message = "您輸入的帳號或密碼無效，請重新嘗試。如果您忘記了登入資訊，請點擊忘記帳號或密碼。"
-    dialog = SimpleNamespace(is_visible=lambda: visible, inner_text=lambda **kwargs: message)
     def locator(selector):
         assert '[class*="Pure__StatusBar-"]' in selector
-        return SimpleNamespace(count=lambda: 1, nth=lambda i: dialog)
+        assert selector.endswith(':visible')
+        return SimpleNamespace(all_inner_texts=lambda: [message] if visible else [])
     frame = SimpleNamespace(url="https://internet-banking.dbs.com.tw/digitw/login", locator=locator)
     page = SimpleNamespace(frames=[frame])
     if visible:
