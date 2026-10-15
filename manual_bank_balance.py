@@ -495,8 +495,8 @@ def _navigate_first_bank(page, visited):
                 continue
             button = frame.locator("#m-sum:visible")
             if "first_twd_total" not in visited and button.count() == 1:
-                visited.add("first_twd_total")
                 button.click(timeout=5000)
+                visited.add("first_twd_total")
                 return True
     return False
 
@@ -535,8 +535,8 @@ def _navigate_cathay(page, visited):
     if "cathay_twd_overview" not in visited and is_bank_url(page.url, "cathay"):
         overview = page.locator('button[data-evt="home_twd_overview"]:visible')
         if overview.count() == 1:
-            visited.add("cathay_twd_overview")
             overview.click(timeout=5000)
+            visited.add("cathay_twd_overview")
             return True
     return False
 
@@ -559,6 +559,19 @@ BANK_ADAPTERS = {
 
 
 def click_balance_navigation(page, bank, visited):
+    if dismiss_balance_notice(page, bank):
+        return False
+    try:
+        return _click_balance_navigation(page, bank, visited)
+    except PlaywrightError as error:
+        # Announcements can arrive after the poll's notice check. Retry only
+        # read-only navigation, after a recognized notice was actually deferred.
+        if "intercepts pointer events" in str(error) and dismiss_balance_notice(page, bank):
+            return False
+        raise
+
+
+def _click_balance_navigation(page, bank, visited):
     adapter = BANK_ADAPTERS.get(bank)
     if adapter and adapter.navigate:
         if adapter.navigate(page, visited):
@@ -575,8 +588,8 @@ def click_balance_navigation(page, bank, visited):
             links = frame.locator("a, button").filter(has_text=re.compile(r"^\s*" + re.escape(label) + r"\s*$"))
             matches.extend(links.nth(index) for index in range(links.count()) if links.nth(index).is_visible())
         if len(matches) == 1:
-            visited.add(label)
             matches[0].click(timeout=5000)
+            visited.add(label)
             return True
     return False
 
@@ -645,11 +658,35 @@ def dismiss_balance_notice(page, bank):
             if cancel.count() == 1:
                 cancel.click(timeout=5000)
                 return True
-    if bank == "first_bank":
-        cancel = page.locator('a.btn-cancel[href="#confirmMsg"]:visible')
-        if cancel.count() == 1 and "因您尚未辦理資料更新" in page.locator("body").inner_text(timeout=1000):
-            cancel.click(timeout=5000)
-            return True
+    for frame in page.frames:
+        if not is_bank_url(frame.url, bank):
+            continue
+        try:
+            if bank == "first_bank":
+                notice = frame.locator('.modality-modal.mm-show:visible').filter(
+                    has_text="因您尚未辦理資料更新")
+                action = notice.get_by_text("下次再說", exact=True)
+            elif bank == "chb":
+                notice = frame.locator('.orange-style-modal.in:visible').filter(
+                    has_text="密碼到期通知").filter(has_text="密碼已經超過三個月未變更")
+                action = notice.locator('.modal-footer button:visible').filter(
+                    has_text=re.compile(r"^\s*關閉\s*$"))
+            elif bank == "taishin":
+                action = frame.get_by_role("button", name="之後提醒我", exact=True)
+                notice = action.locator(
+                    "xpath=ancestor::*[contains(@class, '_popup') and contains(., '台新Richart會員條款')][1]")
+            elif bank == "cathay":
+                notice = frame.get_by_role("dialog").filter(has_text="您尚未啟用「登入兩步驟」")
+                action = notice.get_by_text("暫時不用", exact=True)
+            else:
+                continue
+            if notice.count() == 1 and notice.is_visible() and action.count() == 1 and action.is_visible():
+                action.click(timeout=5000)
+                notice.wait_for(state="hidden", timeout=5000)
+                return True
+        except PlaywrightError as error:
+            if not is_frame_transition_error(error):
+                raise
     return False
 
 

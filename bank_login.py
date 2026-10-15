@@ -130,6 +130,21 @@ def _check_login_error(page, is_official):
 def dismiss_login_notice(page, frame, bank, is_official, *, wait_for_notice=False):
     if not is_official(page.url) or not is_official(frame.url):
         return
+    if bank == "shanghai":
+        notice = frame.locator('.modal.custom-modal[role="dialog"]:visible')
+        if wait_for_notice and notice.count() == 0:
+            try:
+                notice.wait_for(state="visible", timeout=3000)
+            except PlaywrightError:
+                return
+        if notice.count() == 1:
+            text = notice.inner_text(timeout=1000)
+            if "維護公告" in text and "系統維護作業" in text:
+                acknowledge = notice.get_by_text("我知道了", exact=True)
+                if acknowledge.count() == 1 and acknowledge.is_visible():
+                    acknowledge.click(timeout=5000)
+                    notice.wait_for(state="hidden", timeout=5000)
+        return
     if bank == "cathay":
         notice = frame.locator('#divSystemLoginMsgList[role="dialog"]:visible')
         if wait_for_notice and notice.count() == 0:
@@ -184,7 +199,7 @@ def login_once(page, bank, is_official, verification_timeout=120):
     frame, fields, submit = locate_form(page, bank, is_official)
     # Cathay injects its pre-login announcement asynchronously after the form
     # is already usable, so allow one bounded wait before entering credentials.
-    dismiss_login_notice(page, frame, bank, is_official, wait_for_notice=(bank == "cathay"))
+    dismiss_login_notice(page, frame, bank, is_official, wait_for_notice=(bank in ("cathay", "shanghai")))
     for index, (field, value) in enumerate(zip(fields, values)):
         if field is None:
             continue

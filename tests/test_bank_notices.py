@@ -1,0 +1,132 @@
+"""Known bank notices use their own defer controls, without accepting settings."""
+import pytest
+from playwright.sync_api import sync_playwright, Error as PlaywrightError
+
+import manual_bank_balance as bank
+from bank_login import dismiss_login_notice
+from chrome_session import chrome_executable
+
+
+@pytest.fixture
+def page():
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=chrome_executable(), headless=True)
+        try:
+            yield browser.new_page()
+        finally:
+            browser.close()
+
+
+NOTICES = {
+    'first_bank': ('https://ibank.firstbank.com.tw/NetBank/index.html',
+        '<div class="modality-modal mm-show" id="confirmMsg"><p>因您尚未辦理資料更新</p>'
+        '<a class="btn-cancel" href="#confirmMsg">下次再說</a></div>', '下次再說'),
+    'chb': ('https://www.chb.com.tw/chbnib/index',
+        '<div class="modal fade orange-style-modal in"><button aria-label="關閉">×</button><h2>密碼到期通知</h2>'
+        '<p>您的密碼已經超過三個月未變更！</p><div class="modal-footer">'
+        '<button>變更密碼</button><button>關閉</button><button>三個月後再提醒</button></div></div>', '關閉'),
+    'taishin': ('https://my.taishinbank.com.tw/TIBNetBank/',
+        '<div class="_popup"><p>即可使用相同的使用者代號/使用者密碼來登入Richart App</p>'
+        '<a>台新Richart會員條款</a><div class="_popup_footer"><button>立即開通</button>'
+        '<button>之後提醒我</button></div></div>', '之後提醒我'),
+    'cathay': ('https://www.cathaybk.com.tw/MyBank/Home',
+        '<div role="dialog" class="chakra-modal__content"><p>您尚未啟用「登入兩步驟」</p>'
+        '<footer class="chakra-modal__footer"><button>立即啟用</button>'
+        '<button>暫時不用</button></footer></div>', '暫時不用'),
+}
+
+
+def load(page, url, body):
+    page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8', body=
+        '<meta charset="utf-8">' + body + '''<script>
+        window.clicked=[];
+        document.addEventListener('click', e => {
+            if (!e.target.matches('button,a')) return;
+            e.preventDefault(); window.clicked.push(e.target.textContent);
+            e.target.closest('.modality-modal,.modal,._popup,[role=dialog]').remove();
+        });</script>'''))
+    page.goto(url)
+
+
+@pytest.mark.parametrize('key', list(NOTICES))
+@pytest.mark.parametrize('known', [True, False])
+def test_only_exact_known_notice_is_deferred(page, key, known):
+    url, html, action = NOTICES[key]
+    if not known:
+        for original in ('因您尚未辦理資料更新', '密碼到期通知', '台新Richart會員條款', '您尚未啟用「登入兩步驟」'):
+            html = html.replace(original, '其他尚未確認內容')
+    load(page, url, html)
+    assert bank.dismiss_balance_notice(page, key) is known
+    assert page.evaluate('window.clicked') == ([action] if known else [])
+
+
+def test_foreign_page_does_not_dismiss_bank_notice(page):
+    _, html, _ = NOTICES['cathay']
+    load(page, 'https://untrusted.example/', html)
+    assert not bank.dismiss_balance_notice(page, 'cathay')
+    assert page.evaluate('window.clicked') == []
+
+
+def test_late_first_bank_notice_is_dismissed_before_next_navigation_attempt(page, monkeypatch):
+    url, html, _ = NOTICES['first_bank']
+    load(page, url, '<div id="late"></div>')
+    attempts = []
+    def navigate(page, visited):
+        attempts.append(True)
+        if len(attempts) == 1:
+            page.locator('#late').evaluate('(e, html) => e.innerHTML = html', html)
+            raise PlaywrightError('a div intercepts pointer events')
+        visited.add('complete')
+        return True
+    monkeypatch.setitem(bank.BANK_ADAPTERS, 'first_bank', bank.BankAdapter(navigate=navigate, allow_generic_navigation=False))
+    visited = set()
+    assert not bank.click_balance_navigation(page, 'first_bank', visited)
+    assert bank.click_balance_navigation(page, 'first_bank', visited)
+    assert visited == {'complete'}
+    assert page.evaluate('window.clicked') == ['下次再說']
+
+
+def test_unknown_overlay_keeps_navigation_error_visible(page, monkeypatch):
+    load(page, NOTICES['first_bank'][0], '')
+    def navigate(*args):
+        raise PlaywrightError('unknown blocker intercepts pointer events')
+    monkeypatch.setitem(bank.BANK_ADAPTERS, 'first_bank', bank.BankAdapter(navigate=navigate))
+    with pytest.raises(PlaywrightError, match='unknown blocker'):
+        bank.click_balance_navigation(page, 'first_bank', set())
+
+
+@pytest.mark.parametrize('known', [True, False])
+def test_shanghai_acknowledges_only_scoped_maintenance_announcement(page, known):
+    url = 'https://ebank.scsb.com.tw/'
+    body = '<div class="modal custom-modal" role="dialog"><h2>網路銀行 10/14、10/15 維護公告</h2>' \
+           '<p>本行為提供更優質的服務，將進行系統維護作業。</p><button>我知道了</button></div>'
+    if not known:
+        body = body.replace('維護公告', '尚未確認的條款')
+    load(page, url, body)
+    dismiss_login_notice(page, page.main_frame, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
+    assert page.evaluate('window.clicked') == (['我知道了'] if known else [])
+
+
+@pytest.mark.parametrize('key', list(NOTICES))
+def test_duplicate_defer_controls_are_not_clicked(page, key):
+    url, html, action = NOTICES[key]
+    tag = 'a' if key == 'first_bank' else 'button'
+    html = html.replace(f'>{action}</{tag}>', f'>{action}</{tag}><{tag}>{action}</{tag}>')
+    load(page, url, html)
+    assert not bank.dismiss_balance_notice(page, key)
+    assert page.evaluate('window.clicked') == []
+
+
+@pytest.mark.parametrize('key, method', [('first_bank', '_navigate_first_bank'), ('cathay', '_navigate_cathay')])
+def test_failed_navigation_is_not_recorded_as_completed(key, method):
+    from types import SimpleNamespace
+    def blocked(**kwargs):
+        raise PlaywrightError('known notice intercepts pointer events')
+    button = SimpleNamespace(count=lambda: 1, click=blocked)
+    url = NOTICES[key][0] if key != 'first_bank' else 'https://ibank.firstbank.com.tw/NetBank/1/acntReviewAll.html'
+    frame = SimpleNamespace(url=url, locator=lambda selector: button)
+    page = SimpleNamespace(url=url, frames=[frame], locator=frame.locator)
+    visited = set()
+    with pytest.raises(PlaywrightError):
+        getattr(bank, method)(page, visited)
+    assert visited == set()
