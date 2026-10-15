@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import re
+import time
 
 from dotenv import load_dotenv
 from playwright.sync_api import Error as PlaywrightError
@@ -49,6 +50,18 @@ def locate_form(page, bank, is_official):
             continue
         return frame, fields, submit
     raise BankQueryError("未找到已驗證的個人網銀登入表單，未送出帳密", "login_form_unavailable")
+
+
+def wait_for_login_form(page, bank, is_official, *, timeout=20):
+    """Reacquire a rebuilding form before any credentials are entered."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return locate_form(page, bank, is_official)
+        except BankQueryError as error:
+            if error.code != "login_form_unavailable" or time.monotonic() >= deadline:
+                raise
+            page.wait_for_timeout(250)
 
 
 def is_logout_href(href):
@@ -196,7 +209,10 @@ def handle_bank_dialog(dialog, bank, is_official, alerts):
 def login_once(page, bank, is_official, verification_timeout=120):
     spec = LOGIN_FORMS[bank]
     values = bank_credentials(bank)
-    frame, fields, submit = locate_form(page, bank, is_official)
+    # Shanghai can rebuild its SPA after the caller's successful preflight.
+    # Retry only this read-only lookup, never filling or submitting the form.
+    frame, fields, submit = (wait_for_login_form(page, bank, is_official) if bank == "shanghai"
+                              else locate_form(page, bank, is_official))
     # Cathay injects its pre-login announcement asynchronously after the form
     # is already usable, so allow one bounded wait before entering credentials.
     dismiss_login_notice(page, frame, bank, is_official, wait_for_notice=(bank in ("cathay", "shanghai")))

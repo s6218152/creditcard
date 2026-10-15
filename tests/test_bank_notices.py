@@ -4,6 +4,7 @@ from playwright.sync_api import sync_playwright, Error as PlaywrightError
 
 import manual_bank_balance as bank
 from bank_login import dismiss_login_notice
+import bank_login
 from chrome_session import chrome_executable
 
 
@@ -130,3 +131,70 @@ def test_failed_navigation_is_not_recorded_as_completed(key, method):
     with pytest.raises(PlaywrightError):
         getattr(bank, method)(page, visited)
     assert visited == set()
+
+
+def test_shanghai_form_rebuild_between_preflight_and_login_is_waited_for(page, monkeypatch):
+    url = 'https://ebank.scsb.com.tw/'
+    html = '<form id="loginForm" onsubmit="event.preventDefault(); window.submits++">' \
+           '<input id="userId"><input id="idNumber"><input id="pppd" type="password">' \
+           '<input id="verified" maxlength="5"><button type="submit">登入</button></form>'
+    page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8',
+                                                 body='<meta charset="utf-8">' + html))
+    page.goto(url)
+    page.evaluate('window.submits=0')
+    official = lambda url: bank.is_bank_url(url, 'shanghai')
+    bank_login.locate_form(page, 'shanghai', official)
+    page.locator('#loginForm').evaluate('''e => {
+        const html = e.outerHTML; e.remove();
+        setTimeout(() => document.body.insertAdjacentHTML('beforeend', html), 500);
+    }''')
+    monkeypatch.setattr(bank_login, 'bank_credentials', lambda key: ('test-id', 'test-user', 'test-password'))
+    monkeypatch.setattr(bank_login, 'dismiss_login_notice', lambda *args, **kwargs: None)
+    monkeypatch.setattr(bank_login, 'try_fill_captcha', lambda *args: True)
+    assert bank_login.login_once(page, 'shanghai', official)
+    assert page.evaluate('window.submits') == 1
+    assert page.locator('#userId').input_value() == 'test-id'
+    assert page.locator('#idNumber').input_value() == 'test-user'
+
+
+def test_shanghai_submit_failure_is_never_retried(monkeypatch):
+    from types import SimpleNamespace
+    calls, submissions = [], []
+    def submit(**kwargs):
+        submissions.append(True)
+        raise PlaywrightError('browser closed after submit')
+    field = SimpleNamespace(fill=lambda *args, **kwargs: None)
+    frame = SimpleNamespace(url='https://ebank.scsb.com.tw/', locator=lambda selector: SimpleNamespace(count=lambda: 1))
+    def locate(*args):
+        calls.append(True)
+        return frame, [field] * 3, SimpleNamespace(click=submit)
+    monkeypatch.setattr(bank_login, 'bank_credentials', lambda key: ('test-id', 'test-user', 'test-password'))
+    monkeypatch.setattr(bank_login, 'locate_form', locate)
+    monkeypatch.setattr(bank_login, 'dismiss_login_notice', lambda *args, **kwargs: None)
+    monkeypatch.setattr(bank_login, 'try_fill_captcha', lambda *args: True)
+    with pytest.raises(PlaywrightError, match='after submit'):
+        bank_login.login_once(SimpleNamespace(url=frame.url), 'shanghai', lambda url: True)
+    assert len(calls) == len(submissions) == 1
+
+
+def test_login_form_wait_keeps_timeout_as_an_unsubmitted_form_error(page):
+    url = 'https://ebank.scsb.com.tw/'
+    load(page, url, '')
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.wait_for_login_form(page, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'), timeout=0)
+    assert caught.value.code == 'login_form_unavailable'
+    assert page.evaluate('window.clicked') == []
+
+
+def test_login_form_wait_stops_immediately_on_foreign_redirect():
+    from types import SimpleNamespace
+    waits = []
+    page = SimpleNamespace(url='https://ebank.scsb.com.tw/', frames=[])
+    def redirect(milliseconds):
+        waits.append(milliseconds)
+        page.url = 'https://untrusted.example/'
+    page.wait_for_timeout = redirect
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.wait_for_login_form(page, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
+    assert caught.value.code == 'untrusted_url'
+    assert waits == [250]
