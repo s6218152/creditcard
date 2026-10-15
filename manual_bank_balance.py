@@ -7,7 +7,7 @@ from collections.abc import Callable
 import re
 import time
 
-from playwright.sync_api import Error as PlaywrightError, sync_playwright
+from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from bank_registry import AUTO_BANKS
 from chrome_session import system_chrome_context
@@ -619,10 +619,21 @@ def prepare_entry(page, bank):
                 chinese.first.wait_for(state="visible", timeout=5000)
                 if chinese.count() != 1:
                     raise BankQueryError("上海繁中語言選項不唯一，未送出帳密", "login_language_unavailable")
-                # The bank translates labels before reloading the document.
-                # Wait for that reload so credentials cannot be cleared by it.
-                with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
-                    chinese.click(timeout=5000)
+                # Labels may translate before a delayed reload, or the switch
+                # may finish in the same document. Wait before filling either way.
+                language_clicked = False
+                try:
+                    with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
+                        chinese.click(timeout=5000)
+                        language_clicked = True
+                except PlaywrightTimeoutError:
+                    if (not language_clicked or not official(page.url)
+                            or page.evaluate("document.readyState") != "complete"):
+                        raise
+                    translated = page.locator('button[type="submit"]:text-is("登入"):visible')
+                    if translated.count() != 1:
+                        raise
+                    locate_form(page, bank, official)
                 page.locator('button[type="submit"]:text-is("登入"):visible').wait_for(timeout=20_000)
                 return
             except PlaywrightError:

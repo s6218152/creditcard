@@ -229,6 +229,30 @@ def test_shanghai_english_announcement_and_delayed_language_reload(page, stage):
     assert page.locator('#pppd').input_value() == ''
 
 
+@pytest.mark.parametrize('complete_form', [True, False])
+def test_shanghai_language_switch_without_reload_requires_complete_form(page, monkeypatch, complete_form):
+    from manual_bank_balance import prepare_entry
+    markup = '<button onclick="document.querySelector(\'#choice\').style.display=\'block\'">EN</button>' \
+             '<a id="choice" data-lang-locale="zh-TW" style="display:none" onclick="' \
+             'document.querySelector(\'#submit\').textContent=\'登入\'">繁中</a>' \
+             '<input id="userId"><input id="idNumber"><input id="pppd">' \
+             '<button id="submit" type="submit">Log in</button>'
+    if not complete_form:
+        markup = markup.replace('<input id="pppd">', '')
+    page.route('**/*', lambda route: route.fulfill(content_type='text/html; charset=utf-8', body=markup))
+    page.goto('https://ebank.scsb.com.tw/')
+    original = page.expect_navigation
+    monkeypatch.setattr(page, 'expect_navigation', lambda **kwargs: original(**{**kwargs, 'timeout': 300}))
+    if not complete_form:
+        with pytest.raises(bank_login.BankQueryError) as caught:
+            prepare_entry(page, 'shanghai')
+        assert caught.value.code == 'login_form_unavailable'
+    else:
+        prepare_entry(page, 'shanghai')
+        assert page.locator('#submit').inner_text() == '登入'
+        assert page.locator('#pppd').input_value() == ''
+
+
 def test_cathay_notice_is_scoped_by_visible_container_with_dialog_role(page):
     url, html, _ = NOTICES['cathay']
     load(page, url, html.replace('alertdialog', 'dialog'))
