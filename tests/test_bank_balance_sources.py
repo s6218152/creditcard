@@ -154,6 +154,39 @@ def test_chb_waits_for_loading_layer_started_by_menu(page):
     assert "chb_twd_menu" in visited
 
 
+def test_chb_scrolls_balance_entry_clear_of_fixed_header(page, monkeypatch):
+    from manual_bank_balance import click_chb_navigation
+    from playwright.sync_api import Locator
+    load_mock_page(page, "https://www.chb.com.tw/netbank/overview", """
+        <style>
+          body {height:3000px;margin:0}
+          header {position:fixed;top:0;left:0;width:100%;height:120px;background:white;z-index:10}
+          nav {position:absolute;top:800px}
+          a {display:block;width:200px;height:40px}
+          #menu {position:absolute;top:250px}
+        </style>
+        <header class="header fixed">固定頁首</header>
+        <nav>
+          <a id="menu" data-txnmenuid="TW">臺幣存款</a>
+          <a data-url="../TxnPage/tw#!/tw01001_1" onclick="window.entryClicked=true">活期餘額</a>
+        </nav>
+    """)
+    page.evaluate("window.scrollTo(0,750)")
+    original_click = Locator.click
+    def click_clear_entry(locator, **kwargs):
+        if locator.get_attribute('data-url') == '../TxnPage/tw#!/tw01001_1':
+            assert locator.evaluate('''e => {
+                const r = e.getBoundingClientRect();
+                return e.contains(document.elementFromPoint(r.x+r.width/2, r.y+r.height/2));
+            }'''), 'Balance entry must clear the fixed header before its bounded click'
+        return original_click(locator, **kwargs)
+    monkeypatch.setattr(Locator, 'click', click_clear_entry)
+    visited = set()
+    assert click_chb_navigation(page, visited)
+    assert page.evaluate("window.entryClicked") is True
+    assert visited == {"chb_twd_menu"}
+
+
 def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     from ctbc_balance import LOGIN_URL, login_from_environment
     for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):

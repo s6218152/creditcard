@@ -450,6 +450,9 @@ def _click_chb_navigation(page, visited):
                 # pre-menu check cannot protect this subsequent click.
                 frame.locator("#loading-icon-wrap.show:visible").wait_for(
                     state="hidden", timeout=15_000)
+                # A visible entry can still sit behind CHB's fixed header.
+                # Place it away from the edge before the normal hit-tested click.
+                entry.evaluate("e => e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'})")
                 entry.click(timeout=5000)
             except PlaywrightError as error:
                 # Distinguish a hidden template link from an unavailable menu.
