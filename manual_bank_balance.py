@@ -695,6 +695,13 @@ def dismiss_balance_notice(page, bank):
                 notice = frame.locator('.chakra-modal__content-container:visible').filter(
                     has_text="您尚未啟用「登入兩步驟」")
                 action = notice.get_by_text("暫時不用", exact=True)
+                if notice.count() == 0:
+                    notice = frame.locator('.chakra-modal__content-container:visible').filter(
+                        has_text="系統維護公告").filter(
+                        has_text="配合國泰證券系統維護作業").filter(
+                        has_text="暫停證券相關查詢服務")
+                    action = notice.locator('.chakra-modal__footer button:visible').filter(
+                        has_text=re.compile(r"^\s*下次再提醒\s*$"))
             else:
                 continue
             if notice.count() == 1 and notice.is_visible() and action.count() == 1 and action.is_visible():

@@ -234,3 +234,21 @@ def test_cathay_notice_is_scoped_by_visible_container_with_dialog_role(page):
     load(page, url, html.replace('alertdialog', 'dialog'))
     assert bank.dismiss_balance_notice(page, 'cathay')
     assert page.evaluate('window.clicked') == ['暫時不用']
+
+
+@pytest.mark.parametrize('variant', ['known', 'unknown_title', 'unknown_body', 'duplicate', 'foreign'])
+def test_cathay_securities_maintenance_uses_only_remind_later(page, variant):
+    html = '<div class="chakra-modal__content-container"><h2>系統維護公告</h2>' \
+           '<p>2026/10/17 配合國泰證券系統維護作業，維護期間將暫停證券相關查詢服務。</p>' \
+           '<footer class="chakra-modal__footer"><button>不要再顯示</button>' \
+           '<button>下次再提醒</button></footer></div>'
+    if variant == 'unknown_title':
+        html = html.replace('系統維護公告', '其他公告')
+    elif variant == 'unknown_body':
+        html = html.replace('配合國泰證券系統維護作業', '請啟用新的驗證設定')
+    elif variant == 'duplicate':
+        html = html.replace('</footer>', '<button>下次再提醒</button></footer>')
+    url = NOTICES['cathay'][0] if variant != 'foreign' else 'https://untrusted.example/'
+    load(page, url, html)
+    assert bank.dismiss_balance_notice(page, 'cathay') is (variant == 'known')
+    assert page.evaluate('window.clicked') == (['下次再提醒'] if variant == 'known' else [])
