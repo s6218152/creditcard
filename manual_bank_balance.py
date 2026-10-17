@@ -599,7 +599,14 @@ def _click_balance_navigation(page, bank, visited):
 
 def prepare_entry(page, bank):
     if bank == "shanghai" and is_bank_url(page.url, bank):
-        page.locator(LOGIN_FORMS[bank].submit + ":visible").wait_for(timeout=20_000)
+        try:
+            page.locator(LOGIN_FORMS[bank].submit + ":visible").wait_for(timeout=20_000)
+        except PlaywrightTimeoutError as error:
+            if not is_bank_url(page.url, bank):
+                raise BankQueryError("上海登入頁已離開官方網址，未送出帳密", "untrusted_url") from error
+            raise BankQueryError(
+                "上海商銀登入頁未能在等待時間內載入登入按鈕；本次未送出帳密，請稍後再試",
+                "login_page_load_timeout") from error
         official = lambda url: is_bank_url(url, bank)
         for attempt in range(3):
             if not official(page.url):

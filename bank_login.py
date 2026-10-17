@@ -49,7 +49,39 @@ def locate_form(page, bank, is_official):
         if submit is not None and submit.count() != 1:
             continue
         return frame, fields, submit
+    check_bank_maintenance(page, bank, is_official)
     raise BankQueryError("未找到已驗證的個人網銀登入表單，未送出帳密", "login_form_unavailable")
+
+
+def check_bank_maintenance(page, bank, is_official):
+    """Recognize confirmed service-outage pages only after no form was found."""
+    required = {
+        "first_bank": ("系統維護中", "維護系統：", "第e個網", "暫停服務時間："),
+        "cathay": ("目前網路銀行系統維護中", "請您稍後再使用"),
+        "hncb": ("暫停網路銀行服務公告", "因系統維護，暫停網路銀行服務"),
+    }.get(bank)
+    if not required or not is_official(page.url):
+        return
+    for frame in page.frames:
+        if not is_official(frame.url):
+            continue
+        try:
+            texts = frame.locator("body:visible").all_inner_texts()
+        except PlaywrightError as error:
+            if not is_frame_transition_error(error):
+                raise
+            continue
+        for text in texts:
+            if not all(phrase in text for phrase in required):
+                continue
+            # Copy only date/time syntax, never arbitrary page or account text.
+            window = re.search(
+                r"\d{3,4}/\d{1,2}/\d{1,2}(?:\([日一二三四五六]\))?\s*"
+                r"\d{1,2}:\d{2}\s*[~～]\s*(?:\d{3,4}/\d{1,2}/\d{1,2}\s*)?\d{1,2}:\d{2}", text)
+            when = "（公告時段：" + window.group() + "）" if window else ""
+            raise BankQueryError(
+                f"銀行網銀系統維護中，暫停服務{when}；請待銀行恢復服務後再查詢，本次未取得餘額",
+                "bank_maintenance")
 
 
 def wait_for_login_form(page, bank, is_official, *, timeout=20):

@@ -202,6 +202,102 @@ def test_login_form_wait_stops_immediately_on_foreign_redirect():
     assert waits == [250]
 
 
+MAINTENANCE_PAGES = [
+    ('first_bank', 'https://ibank.firstbank.com.tw/',
+     '系統維護中\n維護系統： 第e個網、友善金融服務網\n暫停服務時間： 2026/11/08 00:00 ~ 03:00',
+     '2026/11/08 00:00 ~ 03:00'),
+    ('cathay', 'https://www.cathaybk.com.tw/',
+     '溫馨提醒\n親愛的客戶您好，目前網路銀行系統維護中，請您稍後再使用，造成不便之處，敬請見諒！', ''),
+    ('hncb', 'https://netbank.hncb.com.tw/',
+     '暫停網路銀行服務公告\n115/11/08(日)00:00~08:00，因系統維護，暫停網路銀行服務，造成您的不便，敬請見諒。',
+     '115/11/08(日)00:00~08:00'),
+]
+
+
+@pytest.mark.parametrize('key,url,text,window', MAINTENANCE_PAGES)
+def test_service_maintenance_stops_before_credentials(page, monkeypatch, key, url, text, window):
+    load(page, url, '<main style="white-space:pre-wrap">' + text + '</main>')
+    monkeypatch.setattr(bank_login, 'bank_credentials', lambda *args: ('test-id', 'test-user', 'test-password'))
+    monkeypatch.setattr(bank_login, 'dismiss_login_notice', lambda *args, **kwargs: pytest.fail('must stop before filling'))
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.login_once(page, key, lambda value: bank.is_bank_url(value, key))
+    assert caught.value.code == 'bank_maintenance'
+    assert '本次未取得餘額' in str(caught.value)
+    assert window in str(caught.value)
+    assert page.evaluate('window.clicked') == []
+
+
+@pytest.mark.parametrize('key,url,text,window', MAINTENANCE_PAGES)
+def test_hidden_maintenance_does_not_explain_missing_form(page, key, url, text, window):
+    load(page, url, '<main hidden>' + text + '</main>')
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.locate_form(page, key, lambda value: bank.is_bank_url(value, key))
+    assert caught.value.code == 'login_form_unavailable'
+
+
+def test_usable_form_takes_priority_over_maintenance_text_in_another_frame(page):
+    key, url, text, _ = MAINTENANCE_PAGES[0]
+    load(page, url, '<main>' + text + '</main><iframe></iframe>')
+    page.frames[1].goto(url + 'login')
+    page.frames[1].set_content('<input id="loginCustIdFake"><input id="usrIdInput">'
+                               '<input id="pwd"><button id="captchaLoginArea">登入</button>')
+    frame, _, _ = bank_login.locate_form(page, key, lambda value: bank.is_bank_url(value, key))
+    assert frame == page.frames[1]
+
+
+@pytest.mark.parametrize('foreign_frame', [True, False])
+def test_foreign_maintenance_text_is_not_trusted(page, foreign_frame):
+    key, url, text, _ = MAINTENANCE_PAGES[0]
+    if foreign_frame:
+        load(page, url, '<iframe></iframe>')
+        page.frames[1].goto('https://untrusted.example/')
+        page.frames[1].set_content(text)
+    else:
+        load(page, 'https://untrusted.example/', text)
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.locate_form(page, key, lambda value: bank.is_bank_url(value, key))
+    assert caught.value.code == ('login_form_unavailable' if foreign_frame else 'untrusted_url')
+
+
+def test_partial_securities_maintenance_is_not_a_login_service_outage(page):
+    load(page, 'https://www.cathaybk.com.tw/',
+         '系統維護公告：2026/11/08 配合國泰證券系統維護作業，暫停證券相關查詢服務')
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank_login.locate_form(page, 'cathay', lambda value: bank.is_bank_url(value, 'cathay'))
+    assert caught.value.code == 'login_form_unavailable'
+
+
+def test_shanghai_blank_entry_has_a_prelogin_timeout(page, monkeypatch):
+    from playwright.sync_api import Locator
+    original_wait = Locator.wait_for
+    monkeypatch.setattr(Locator, 'wait_for', lambda self, **kwargs: original_wait(self, **{**kwargs, 'timeout': 50}))
+    load(page, 'https://ebank.scsb.com.tw/', '')
+    with pytest.raises(bank_login.BankQueryError) as caught:
+        bank.prepare_entry(page, 'shanghai')
+    assert caught.value.code == 'login_page_load_timeout'
+    assert '本次未送出帳密' in str(caught.value)
+    assert page.evaluate('window.clicked') == []
+
+
+@pytest.mark.parametrize('foreign_redirect', [True, False])
+def test_shanghai_entry_preserves_redirect_and_browser_closure(page, monkeypatch, foreign_redirect):
+    from playwright.sync_api import Locator, TimeoutError
+    load(page, 'https://ebank.scsb.com.tw/', '')
+    def fail_wait(self, **kwargs):
+        if foreign_redirect:
+            page.goto('https://untrusted.example/')
+            raise TimeoutError('login selector timeout')
+        raise PlaywrightError('Target page, context or browser has been closed')
+    monkeypatch.setattr(Locator, 'wait_for', fail_wait)
+    if foreign_redirect:
+        with pytest.raises(bank_login.BankQueryError) as caught:
+            bank.prepare_entry(page, 'shanghai')
+        assert caught.value.code == 'untrusted_url'
+    else:
+        with pytest.raises(PlaywrightError, match='has been closed'):
+            bank.prepare_entry(page, 'shanghai')
+
+
 @pytest.mark.parametrize('stage', ['before_language', 'after_menu'])
 def test_shanghai_english_announcement_and_delayed_language_reload(page, stage):
     from manual_bank_balance import prepare_entry
