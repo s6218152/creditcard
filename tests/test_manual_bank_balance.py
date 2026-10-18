@@ -33,6 +33,7 @@ def test_failed_initial_navigation_never_attempts_login(monkeypatch):
     def chrome(*args):
         yield context
     monkeypatch.setattr(bank, 'sync_playwright', playwright)
+    monkeypatch.setattr(bank, 'public_host_resolver_rule', lambda host: 'MAP ebank.feib.com.tw 93.184.216.34')
     monkeypatch.setattr(bank, 'diagnostic_chrome_context', chrome)
     monkeypatch.setattr(bank, 'login_once', lambda *args: pytest.fail('must not log in'))
     with pytest.raises(BankQueryError) as caught:

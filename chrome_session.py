@@ -9,6 +9,9 @@ from pathlib import Path
 import shutil
 import socket
 from urllib.request import urlopen
+from urllib.parse import urlencode
+from ipaddress import IPv4Address
+import json
 import subprocess
 import sys
 import tempfile
@@ -46,8 +49,40 @@ def wait_for_debug_port(port: int, process, timeout: float = 20) -> int:
     raise ValueError("等待 Chrome 本機連線逾時")
 
 
+def public_host_resolver_rule(host):
+    """Resolve a public host for Chrome while keeping its HTTPS name and TLS checks."""
+    def public_address(values):
+        for value in values:
+            try:
+                address = IPv4Address(value)
+            except ValueError:
+                continue
+            if address.is_global:
+                return str(address)
+        return None
+    try:
+        address = public_address(item[4][0] for item in socket.getaddrinfo(host, 443, family=socket.AF_INET))
+    except OSError:
+        address = None
+    if not address:
+        # Only the public hostname is sent, never bank credentials or page URLs.
+        query = urlencode({"name": host, "type": "A"})
+        try:
+            with urlopen("https://dns.google/resolve?" + query, timeout=10) as response:
+                answer = json.load(response)
+            if isinstance(answer, dict) and answer.get("Status") == 0:
+                address = public_address(item.get("data", "") for item in answer.get("Answer", [])
+                    if isinstance(item, dict) and item.get("type") == 1
+                    and item.get("name", "").rstrip(".").lower() == host.lower())
+        except (OSError, ValueError):
+            pass
+    if not address:
+        raise ValueError("無法解析銀行官方登入網址")
+    return f"MAP {host} {address}"
+
+
 @contextmanager
-def system_chrome_context(playwright):
+def system_chrome_context(playwright, *, host_resolver_rules=None):
     executable = chrome_executable()
     with tempfile.TemporaryDirectory(prefix="ctbc-chrome-") as directory:
         profile = Path(directory)
@@ -57,7 +92,8 @@ def system_chrome_context(playwright):
         process = subprocess.Popen(
             [executable, f"--user-data-dir={profile}", "--remote-debugging-address=127.0.0.1",
              f"--remote-debugging-port={debug_port}", "--no-first-run", "--no-default-browser-check",
-             "--window-size=1440,1000", "about:blank"],
+             "--window-size=1440,1000",
+             *([f"--host-resolver-rules={host_resolver_rules}"] if host_resolver_rules else []), "about:blank"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         browser = None

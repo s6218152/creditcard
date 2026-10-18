@@ -224,6 +224,25 @@ def test_chb_retries_only_known_layer_appearing_after_readiness_check(page, monk
         assert visited == set()
 
 
+def test_chb_narrow_tall_entry_uses_visible_area_below_fixed_header(page):
+    from manual_bank_balance import click_chb_navigation
+    load_mock_page(page, 'https://www.chb.com.tw/netbank/overview', '''
+        <style>
+          header {position:fixed;inset:0 0 auto;height:74px;background:white;z-index:10}
+          #menu {position:fixed;top:300px}
+          #entry {position:fixed;left:116px;top:-16px;width:28px;height:179px}
+        </style>
+        <header class="header fixed">固定頁首</header>
+        <nav><a id="menu" data-txnmenuid="TW">新臺幣帳戶</a>
+          <a id="entry" data-url="../TxnPage/tw#!/tw01001_1"
+             onclick="window.entryClicked=true">新臺幣活期餘額</a></nav>
+    ''')
+    visited = set()
+    assert click_chb_navigation(page, visited)
+    assert page.evaluate('window.entryClicked') is True
+    assert visited == {'chb_twd_menu'}
+
+
 def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     from ctbc_balance import LOGIN_URL, login_from_environment
     for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):

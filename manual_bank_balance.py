@@ -4,13 +4,14 @@ from urllib.parse import urlparse
 from decimal import Decimal
 from dataclasses import dataclass
 from collections.abc import Callable
+from functools import partial
 import re
 import time
 
 from playwright.sync_api import Error as PlaywrightError, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from bank_registry import AUTO_BANKS
-from chrome_session import system_chrome_context
+from chrome_session import system_chrome_context, public_host_resolver_rule
 from bank_diagnostics import diagnostic_chrome_context, has_verification_challenge
 from bank_login import BankQueryError, LOGIN_FORMS, login_once, locate_form, has_logged_in, check_login_error, handle_bank_dialog, is_frame_transition_error, dismiss_login_notice
 from bank_captcha import CAPTCHA_IMAGES
@@ -454,8 +455,23 @@ def _click_chb_navigation(page, visited):
                 # Place it away from the edge before the normal hit-tested click.
                 for attempt in range(2):
                     entry.evaluate("e => e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'})")
+                    position = entry.evaluate('''e => {
+                        const r=e.getBoundingClientRect();
+                        const contains=(x,y)=>{const hit=document.elementFromPoint(x,y);return !!hit && e.contains(hit)};
+                        if(contains(r.x+r.width/2,r.y+r.height/2)) return null;
+                        const header=document.querySelector('header.header.fixed');
+                        const top=Math.max(0,r.top,header?.getBoundingClientRect().bottom ?? 0);
+                        const bottom=Math.min(innerHeight,r.bottom);
+                        const left=Math.max(0,r.left),right=Math.min(innerWidth,r.right);
+                        if(bottom<=top || right<=left) return null;
+                        for(const fy of [.5,.75,.25]) for(const fx of [.5,.25,.75]) {
+                            const x=left+(right-left)*fx,y=top+(bottom-top)*fy;
+                            if(contains(x,y)) return {x:x-r.x,y:y-r.y};
+                        }
+                        return null;
+                    }''')
                     try:
-                        entry.click(timeout=5000)
+                        entry.click(timeout=5000, **({"position": position} if position else {}))
                         break
                     except PlaywrightError as error:
                         if attempt or "intercepts pointer events" not in str(error):
@@ -765,8 +781,15 @@ def dismiss_balance_notice(page, bank):
 def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
     name, url, _ = AUTO_BANKS[bank]
     is_official = lambda location: is_bank_url(location, bank)
+    context_factory = system_chrome_context
+    if bank == "feib":
+        try:
+            rules = public_host_resolver_rule(urlparse(url).hostname)
+        except ValueError as error:
+            raise BankQueryError("無法解析遠東商銀官方登入網址；本次未送出帳密，請稍後再試", "login_dns_failed") from error
+        context_factory = partial(system_chrome_context, host_resolver_rules=rules)
     with sync_playwright() as playwright:
-        with diagnostic_chrome_context(playwright, bank, is_official, system_chrome_context) as context:
+        with diagnostic_chrome_context(playwright, bank, is_official, context_factory) as context:
             page = context.new_page()
             alerts = []
             def on_dialog(dialog):
