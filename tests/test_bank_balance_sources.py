@@ -187,6 +187,43 @@ def test_chb_scrolls_balance_entry_clear_of_fixed_header(page, monkeypatch):
     assert visited == {"chb_twd_menu"}
 
 
+@pytest.mark.parametrize('known_loading', [True, False])
+def test_chb_retries_only_known_layer_appearing_after_readiness_check(page, monkeypatch, known_loading):
+    from playwright.sync_api import Locator, Error
+    from manual_bank_balance import click_chb_navigation
+    load_mock_page(page, 'https://www.chb.com.tw/netbank/overview', '''
+        <a data-txnmenuid="TW">臺幣存款</a>
+        <a data-url="../TxnPage/tw#!/tw01001_1" onclick="window.entryClicked=true">活期餘額</a>
+        <div id="loading-icon-wrap"></div>
+        <style>#loading-icon-wrap.show {position:fixed;inset:0;background:white;z-index:20}</style>
+    ''')
+    original_click = Locator.click
+    attempts = []
+    def late_layer(locator, **kwargs):
+        if locator.get_attribute('data-url') == '../TxnPage/tw#!/tw01001_1':
+            attempts.append(True)
+            if len(attempts) == 1:
+                if known_loading:
+                    page.evaluate('''() => {
+                        const e=document.getElementById('loading-icon-wrap');e.className='show';
+                        setTimeout(()=>e.className='',100);
+                    }''')
+                raise Error('overlay intercepts pointer events')
+        return original_click(locator, **kwargs)
+    monkeypatch.setattr(Locator, 'click', late_layer)
+    visited = set()
+    if known_loading:
+        assert click_chb_navigation(page, visited)
+        assert len(attempts) == 2
+        assert page.evaluate('window.entryClicked') is True
+        assert visited == {'chb_twd_menu'}
+    else:
+        with pytest.raises(Error, match='intercepts pointer events'):
+            click_chb_navigation(page, visited)
+        assert len(attempts) == 1
+        assert visited == set()
+
+
 def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     from ctbc_balance import LOGIN_URL, login_from_environment
     for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):

@@ -141,6 +141,9 @@ def diagnostic_chrome_context(playwright, bank, is_official, context_factory=sys
             interactions = [label for phrase, label in reasons.items() if phrase in message]
             if interactions:
                 error.diagnostics.append({"interaction_reasons": interactions})
+            network_errors = sorted(set(re.findall(r"\bnet::(ERR_[A-Z_]+)\b", str(cause))))
+            if network_errors:
+                error.diagnostics.append({"network_errors": network_errors[:8]})
             interceptors = []
             for line in str(cause).splitlines():
                 if "intercepts pointer events" not in line:

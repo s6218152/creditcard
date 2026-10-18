@@ -110,6 +110,23 @@ def test_shanghai_acknowledges_only_scoped_maintenance_announcement(page, known,
     assert page.evaluate('window.clicked') == ([acknowledge] if known else [])
 
 
+@pytest.mark.parametrize('known', [True, False])
+@pytest.mark.parametrize('acknowledge', ['我知道了', 'I got it'])
+def test_shanghai_interbank_drill_notice_uses_only_acknowledgement(page, known, acknowledge):
+    text = '財金公司跨行系統演練：配合財金公司辦理跨行系統演練，' \
+           '部分時段將暫停跨行服務，本行帳戶提款及互為轉帳等自行服務不受影響。'
+    if not known:
+        text = text.replace('自行服務不受影響', '請輸入密碼開通服務')
+    load(page, 'https://ebank.scsb.com.tw/',
+         '<div class="modal custom-modal" role="dialog"><p>' + text + '</p>'
+         '<label><input type="checkbox">Don\'t show again today</label>'
+         '<button>' + acknowledge + '</button></div>')
+    dismiss_login_notice(page, page.main_frame, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
+    assert page.evaluate('window.clicked') == ([acknowledge] if known else [])
+    if not known:
+        assert not page.locator('input[type="checkbox"]').is_checked()
+
+
 @pytest.mark.parametrize('key', list(NOTICES))
 def test_duplicate_defer_controls_are_not_clicked(page, key):
     url, html, action = NOTICES[key]

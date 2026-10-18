@@ -77,3 +77,18 @@ def test_context_retains_original_error_and_collects_before_closing():
     assert all(value not in json.dumps(original.diagnostics)
                for value in ("private-id", "private-value", "private-text"))
     assert events == ["closed"]
+
+
+def test_navigation_network_diagnostics_preserve_only_fixed_error_codes():
+    @contextmanager
+    def context_factory(playwright):
+        yield SimpleNamespace(pages=[])
+    cause = ValueError('Page.goto: net::ERR_CONNECTION_RESET at https://bank.example/?token=private-secret')
+    with pytest.raises(ValueError) as caught:
+        with diagnostic_chrome_context(None, 'feib', lambda url: False, context_factory):
+            try:
+                raise cause
+            except ValueError as error:
+                raise ValueError('sanitized navigation error') from error
+    assert caught.value.diagnostics == [{'network_errors': ['ERR_CONNECTION_RESET']}]
+    assert 'private-secret' not in json.dumps(caught.value.diagnostics)

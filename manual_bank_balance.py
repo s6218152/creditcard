@@ -452,8 +452,26 @@ def _click_chb_navigation(page, visited):
                     state="hidden", timeout=15_000)
                 # A visible entry can still sit behind CHB's fixed header.
                 # Place it away from the edge before the normal hit-tested click.
-                entry.evaluate("e => e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'})")
-                entry.click(timeout=5000)
+                for attempt in range(2):
+                    entry.evaluate("e => e.scrollIntoView({block:'center', inline:'nearest', behavior:'instant'})")
+                    try:
+                        entry.click(timeout=5000)
+                        break
+                    except PlaywrightError as error:
+                        if attempt or "intercepts pointer events" not in str(error):
+                            raise
+                        loading = frame.locator("#loading-icon-wrap.show:visible")
+                        header_blocked = entry.evaluate('''e => {
+                            const r=e.getBoundingClientRect();
+                            const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+                            return !!hit?.closest('header.header.fixed');
+                        }''')
+                        if not loading.count() and not header_blocked:
+                            raise
+                        # A loading layer can appear after the first readiness
+                        # check. Retry only this read-only navigation, once.
+                        loading.wait_for(state="hidden", timeout=15_000)
+                        page.wait_for_timeout(250)
             except PlaywrightError as error:
                 # Distinguish a hidden template link from an unavailable menu.
                 # Counts and visibility only; no account text or identifiers.
@@ -462,6 +480,15 @@ def _click_chb_navigation(page, visited):
                         "selected_entry_visible": entry.is_visible(),
                         "visible_matching_entries": frame.locator(
                             'a[data-url="../TxnPage/tw#!/tw01001_1"]:visible').count(),
+                        "layout": entry.evaluate('''e => {
+                            const r=e.getBoundingClientRect();
+                            const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+                            const header=document.querySelector('header.header.fixed');
+                            return {entry_bounds:[r.x,r.y,r.width,r.height],
+                                viewport_height:innerHeight,
+                                header_bottom:header?.getBoundingClientRect().bottom ?? null,
+                                center_hits_entry:!!hit && e.contains(hit)};
+                        }'''),
                     }
                 except PlaywrightError:
                     error.navigation_state = {"state": "page_unavailable"}
@@ -746,7 +773,12 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
                 handle_bank_dialog(dialog, bank, is_official, alerts)
             page.on("dialog", on_dialog)
             context.on("page", lambda opened: opened.on("dialog", on_dialog))
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            except PlaywrightError as error:
+                raise BankQueryError(
+                    "無法開啟銀行登入頁，連線失敗或載入逾時；本次未送出帳密，請稍後再試",
+                    "login_page_navigation_failed") from error
             prepare_entry(page, bank)
             # SPA and frame-based banks need time to build their verified form.
             deadline = time.monotonic() + 20

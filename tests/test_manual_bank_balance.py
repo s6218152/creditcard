@@ -16,6 +16,32 @@ def test_only_official_https_urls(bank):
     assert not is_bank_url("https://" + MANUAL_BANKS[bank][2][0] + ".evil.example/", bank)
 
 
+def test_failed_initial_navigation_never_attempts_login(monkeypatch):
+    from contextlib import contextmanager
+    from playwright.sync_api import Error
+    import manual_bank_balance as bank
+    calls = []
+    def goto(*args, **kwargs):
+        calls.append('goto')
+        raise Error('Page.goto: net::ERR_CONNECTION_RESET at https://bank.example/?private=secret')
+    page = SimpleNamespace(on=lambda *args: None, goto=goto)
+    context = SimpleNamespace(new_page=lambda: page, on=lambda *args: None)
+    @contextmanager
+    def playwright():
+        yield None
+    @contextmanager
+    def chrome(*args):
+        yield context
+    monkeypatch.setattr(bank, 'sync_playwright', playwright)
+    monkeypatch.setattr(bank, 'diagnostic_chrome_context', chrome)
+    monkeypatch.setattr(bank, 'login_once', lambda *args: pytest.fail('must not log in'))
+    with pytest.raises(BankQueryError) as caught:
+        bank.query_balance('feib')
+    assert caught.value.code == 'login_page_navigation_failed'
+    assert 'secret' not in str(caught.value)
+    assert calls == ['goto']
+
+
 def frame(url, content, count=1):
     return SimpleNamespace(url=url, locator=lambda selector: SimpleNamespace(
         count=lambda: count, inner_text=lambda **kwargs: content))
