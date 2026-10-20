@@ -2,7 +2,7 @@ name: Monthly Telegram report
 on:
   schedule:
     # UTC 04:00 = Asia/Taipei 12:00; execution and delivery may be delayed.
-    - cron: '0 4 1,15 * *'
+    - cron: '0 4 5,15,25 * *'
   workflow_dispatch:
     inputs:
       banks:
