@@ -39,6 +39,24 @@ def test_parse_single_account_balance():
     assert parse_balance_text("帳戶餘額：NT$ 125680.50") == Decimal("125680.50")
 
 
+@pytest.mark.parametrize("text", [
+    "提醒訊息\n系統錯誤代碼：ESB9015\n確認",
+    "使用者代號或網銀密碼輸入錯誤",
+])
+def test_rejected_credentials_are_not_reported_as_verification_timeout(text):
+    from ctbc_balance import read_bank_page
+    from bank_login import BankQueryError
+    page = SimpleNamespace(
+        url="https://www.ctbcbank.com/twrbc/twrbc-general/ot001/010",
+        locator=lambda selector: SimpleNamespace(inner_text=lambda **kwargs: text),
+    )
+    with pytest.raises(BankQueryError) as caught:
+        read_bank_page(page)
+    assert caught.value.code == "credentials_rejected"
+    assert "ESB9015" in str(caught.value)
+    assert "不會重送帳密" in str(caught.value)
+
+
 def test_reject_missing_or_multiple_balances():
     with pytest.raises(ValueError):
         parse_balance_text("可動用餘額\n125680")

@@ -69,6 +69,12 @@ def read_bank_page(page) -> str:
     text = page.locator("body").inner_text(timeout=5_000)
     if "APP-1053" in text:
         raise ValueError("中信網銀回覆 APP-1053（系統忙碌），未取得餘額；請稍後再試")
+    if "ESB9015" in text or "使用者代號或網銀密碼輸入錯誤" in text:
+        raise BankQueryError(
+            "中信網銀拒絕登入（ESB9015）：使用者代號或網銀密碼輸入錯誤；"
+            "請確認 CTBC_USER_ID、CTBC_PASSWORD，本次不會重送帳密",
+            "credentials_rejected",
+        )
     return text
 
 
