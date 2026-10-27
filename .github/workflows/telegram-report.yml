@@ -9,6 +9,10 @@ on:
         description: '指定銀行名稱或代碼（空格或逗號分隔，如 上海 彰銀）；留白查全部'
         required: false
         default: ''
+      balances_only:
+        description: '只查餘額並傳 Telegram，略過信箱下載與 PDF 解析'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -42,4 +46,5 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REPORT_ENV: ${{ secrets.REPORT_ENV }}
           REPORT_BANKS: ${{ inputs.banks }}
+          REPORT_BALANCES_ONLY: ${{ inputs.balances_only }}
         run: python telegram_report.py

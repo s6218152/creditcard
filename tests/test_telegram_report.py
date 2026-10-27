@@ -26,18 +26,14 @@ def test_redact_credentials(monkeypatch):
 
 
 def test_summary_omits_debug_output_but_preserves_results_and_failures():
-    output = ('fontTools is required to fully parse a font\n'
-              '[銀行] 啟動 Chrome\n'
-              '銀行: 星展\n本期應繳總金額: NT$ 1,051\n'
-              '繳款截止日: 2026/10/16\n臺幣存款餘額: NT$ 1,051.00\n'
-              '銀行: 玉山銀行\n存款餘額: 尚未確認登入成功\n'
-              '提醒：需人工確認\n')
-    text = report.summary_text(output, [
-        {"bank_name": "玉山銀行", "status": "error", "error_code": "login_unconfirmed"},
-        {"bank_name": "華南銀行", "status": "error", "error_message": "連線逾時"}])
+    text = report.render_report({'statements': [{'bank_name': '星展', 'status': 'success',
+        'total_amount': 1051, 'due_date': '115/10/16', 'review_reasons': ['需人工確認']}], 'balances': [
+        {'bank_name': '星展', 'status': 'success', 'balance': '1051', 'currency': 'TWD'},
+        {"bank_name": "玉山銀行", "status": "error", "error_message": "尚未確認登入成功"},
+        {"bank_name": "華南銀行", "status": "error", "error_message": "連線逾時"}]})
     assert "fontTools" not in text and "Chrome" not in text
     assert "NT$ 1,051.00" in text and "2026/10/16" in text
-    assert "尚未確認登入成功" in text and "提醒：需人工確認" in text
+    assert "尚未確認登入成功" in text and "需人工確認" in text
     assert "華南銀行：存款餘額未取得（連線逾時）" in text
 
 
@@ -127,7 +123,9 @@ def test_successful_run_delivers_the_current_manifest(monkeypatch, tmp_path):
         run_ids.append(run_id)
         (tmp_path / "output/latest.json").write_text(json.dumps({
             "run_id": run_id, "generated_at": "2026-10-13T00:00:00+00:00",
-            "files": [], "balances": []}))
+            "files": [], "balances": [], 'statements': [{'bank_name': '目前銀行',
+            'status': 'success', 'total_amount': 1051, 'due_date': '115/10/16'}]}))
+        kwargs['stdout'].write('銀行: 偽造銀行\n本期應繳總金額: NT$ 999999\nfontTools warning'.encode())
         return SimpleNamespace(returncode=0)
 
     messages, documents = [], []
@@ -136,8 +134,41 @@ def test_successful_run_delivers_the_current_manifest(monkeypatch, tmp_path):
     monkeypatch.setattr(report, "send_document", lambda *args: documents.append(args[3]))
     assert report.main() == 0
     assert "執行完成" in messages[0]["text"]
+    assert '目前銀行' in messages[0]['text'] and '1,051' in messages[0]['text']
+    assert '偽造銀行' not in messages[0]['text'] and '999999' not in messages[0]['text']
     with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
         assert json.loads(archive.read("latest.json"))["run_id"] == run_ids[0]
+
+
+@pytest.mark.parametrize('use_environment', [True, False])
+def test_balances_only_telegram_command_and_archive(monkeypatch, tmp_path, use_environment):
+    from types import SimpleNamespace
+    import io
+    import zipfile
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('TELEGRAM_BOT_TOKEN', 'test-token')
+    monkeypatch.setenv('TELEGRAM_CHAT_ID', 'test-chat-id')
+    monkeypatch.setenv('REPORT_ENV', '')
+    monkeypatch.setenv('REPORT_BANKS', '彰銀' if use_environment else '')
+    monkeypatch.setenv('REPORT_BALANCES_ONLY', 'true' if use_environment else '')
+    (tmp_path / 'config.yaml').write_text('storage:\n  output_dir: output\n')
+    (tmp_path / 'output').mkdir()
+    (tmp_path / 'output/old.json').write_text('{"old":true}')
+    def run(command, **kwargs):
+        assert command == [report.sys.executable, 'main.py', '--balances-only', '--bank', 'chb']
+        (tmp_path / 'output/latest.json').write_text(json.dumps({
+            'run_id': kwargs['env']['CREDITCARD_REPORT_RUN_ID'], 'generated_at': '2026-10-28T04:00:00+00:00',
+            'files': [], 'statements': [], 'balances': [{'bank_name': '彰化銀行', 'bank': 'chb',
+                'status': 'success', 'balance': '121', 'currency': 'TWD'}]}))
+        return SimpleNamespace(returncode=0)
+    messages, documents = [], []
+    monkeypatch.setattr(report.subprocess, 'run', run)
+    monkeypatch.setattr(report, 'request_telegram', lambda *args: messages.append(json.loads(args[2])))
+    monkeypatch.setattr(report, 'send_document', lambda *args: documents.append(args[3]))
+    assert report.main(() if use_environment else ['--balances-only', '--bank', '彰銀']) == 0
+    assert '銀行餘額報告' in messages[0]['text'] and '121.00' in messages[0]['text']
+    with zipfile.ZipFile(io.BytesIO(documents[0])) as archive:
+        assert set(archive.namelist()) == {'console.txt', 'latest.json'}
 
 
 @pytest.mark.parametrize("current_diagnostics", [True, False])
@@ -189,7 +220,7 @@ def test_partial_failure_still_sends_report_and_verification_notice(monkeypatch,
     assert "需要人工驗證" in messages[0]["text"]
     assert "上海商銀：登入／驗證未完成" not in messages[0]["text"]
     assert "未找到已驗證的個人網銀登入表單" in messages[0]["text"]
-    assert "本次僅測試銀行餘額：chb、esun" in messages[0]["text"]
+    assert "本次餘額查詢銀行：chb、esun" in messages[0]["text"]
     assert "private-password" not in messages[0]["text"]
     assert "fontTools" not in messages[0]["text"]
     assert "private-bank-notice" not in messages[0]["text"]

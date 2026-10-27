@@ -274,6 +274,33 @@ def test_pipeline_prints_balance_after_cards_and_saves_it(monkeypatch, tmp_path,
     report = json.loads((tmp_path / "output/latest.json").read_text())
     assert report["files"] == ["CTBC_card_Estatement_11509_parsed.json"]
     assert report["balances"][0]["balance"] == "22542"
+    assert report['statements'][0]['total_amount'] == 1234
+    assert report['statements'][0]['due_date_iso'] == '2026-10-10'
+
+
+def test_balances_only_pipeline_never_fetches_or_parses_or_reuses_old_statements(monkeypatch, tmp_path):
+    import json
+    import yaml
+    import main
+    import ctbc_balance
+    config = yaml.safe_load(Path('config.yaml').read_text())
+    config_path = tmp_path / 'config.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    output = tmp_path / config['storage']['output_dir']
+    output.mkdir()
+    (output / 'latest.json').write_text(json.dumps({'run_id': 'old', 'files': ['old.json'],
+                                                 'statements': [{'bank_name': 'Old bank'}]}))
+    def unexpected(*args, **kwargs):
+        raise AssertionError('balances-only must not fetch, parse or prune statements')
+    for name in ('MailFetcher', 'PDFProcessor', 'process_single_pdf', 'prune_old_files'):
+        monkeypatch.setattr(main, name, unexpected)
+    monkeypatch.setattr(ctbc_balance, 'query_balance', lambda selector: Decimal('121'))
+    assert main.run_pipeline(config_path, balance_banks=['ctbc'], balances_only=True, run_id='current')
+    manifest = json.loads((output / 'latest.json').read_text())
+    assert manifest['run_id'] == 'current' and manifest['mode'] == 'balances_only'
+    assert manifest['files'] == manifest['statements'] == []
+    assert manifest['pipeline_status'] == 'success'
+    assert [row['bank'] for row in manifest['balances']] == ['ctbc']
 
 
 def test_pipeline_initializes_current_manifest_before_download_failure(monkeypatch, tmp_path):

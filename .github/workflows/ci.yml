@@ -31,3 +31,19 @@ jobs:
         run: ruff check .
       - name: Unit tests
         run: python -m pytest -q
+
+  browser-macos:
+    # Same OS and Python as the report runner; local mock pages, no bank login.
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.lock
+      - name: Bank browser regression tests
+        run: python -m pytest -q tests/test_bank_browser_layouts.py tests/test_bank_notices.py tests/test_bank_balance_sources.py tests/test_chrome_session.py

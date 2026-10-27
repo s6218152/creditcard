@@ -1,5 +1,6 @@
 """Run the existing pipeline and deliver its output without exposing CI logs."""
 import io
+import argparse
 import json
 import os
 import re
@@ -15,26 +16,7 @@ from uuid import uuid4
 import yaml
 from dotenv import dotenv_values
 from bank_registry import normalize_bank
-
-
-def summary_text(output, balances):
-    prefixes = ("銀行:", "本期應繳總金額:", "繳款截止日:", "臺幣存款餘額:",
-                "臺幣活期存款餘額:", "存款餘額:", "提醒：", "檔案:",
-                "注意：本次部分下載流程失敗", "雲端執行逾時", "銀行篩選設定錯誤：")
-    lines = []
-    standalone = tuple(row.get("bank_name", "") + label for row in balances
-                       for label in ("臺幣存款餘額:", "臺幣活期存款餘額:", "存款餘額:"))
-    for line in output.splitlines():
-        if line.startswith(prefixes + standalone):
-            if line.startswith("銀行:") and lines:
-                lines.append("--------------------")
-            lines.append(line)
-    text = "\n".join(lines)
-    for row in balances:
-        name = row.get("bank_name", "未知銀行")
-        if row.get("status") != "success" and f"銀行: {name}\n" not in text + "\n":
-            lines.append(f"{name}：存款餘額未取得（{row.get('error_message') or row.get('error_code') or row.get('status')}）")
-    return "\n".join(lines) or "本次未產出可顯示的結果；請查看附件中的完整紀錄。"
+from statement_report import render_report
 
 
 def redact(text):
@@ -66,7 +48,9 @@ def read_current_report(path, run_id):
     if (not isinstance(report.get("files", []), list)
             or not all(isinstance(name, str) for name in report.get("files", []))
             or not isinstance(report.get("balances", []), list)
-            or not all(isinstance(row, dict) for row in report.get("balances", []))):
+            or not all(isinstance(row, dict) for row in report.get("balances", []))
+            or not isinstance(report.get("statements", []), list)
+            or not all(isinstance(row, dict) for row in report.get("statements", []))):
         return None
     return public_report(report)
 
@@ -108,7 +92,12 @@ def send_document(token, chat_id, name, content):
     request_telegram(token, "sendDocument", body, f"multipart/form-data; boundary={boundary}")
 
 
-def main():
+def main(argv=()):
+    parser = argparse.ArgumentParser(description="產生報告並傳送 Telegram")
+    parser.add_argument("--balances-only", action="store_true",
+                        default=os.getenv("REPORT_BALANCES_ONLY", "").lower() == "true")
+    parser.add_argument("--bank", action="append", default=[], help="指定查詢銀行，可重複使用")
+    args = parser.parse_args(argv)
     for key, value in dotenv_values(stream=io.StringIO(os.getenv("REPORT_ENV", ""))).items():
         if value is not None:
             os.environ[key] = value
@@ -122,8 +111,10 @@ def main():
     with tempfile.TemporaryFile() as log:
         try:
             command = [sys.executable, "main.py"]
+            if args.balances_only:
+                command.append("--balances-only")
             banks = list(dict.fromkeys(normalize_bank(value) for value in
-                         re.split(r'[\s,，、]+', os.getenv("REPORT_BANKS", "").strip()) if value))
+                         [*args.bank, *re.split(r'[\s,，、]+', os.getenv("REPORT_BANKS", "").strip())] if value))
             for bank in banks:
                 command.extend(["--bank", bank])
             result = subprocess.run(command, stdout=log,
@@ -144,11 +135,13 @@ def main():
     current_report = read_current_report(latest, run_id)
     succeeded = succeeded and current_report is not None
     report = current_report if current_report is not None else {}
-    header = "信用卡完整報告\n" + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
+    header = ("銀行餘額報告\n" if args.balances_only else "信用卡完整報告\n") + ("執行完成\n" if succeeded else "部分流程失敗，請查看原因\n")
     if current_report is None:
         header += "本次尚未產出可確認的報告。\n"
     if banks:
-        header += "本次僅測試銀行餘額：" + "、".join(banks) + "\n"
+        header += "本次餘額查詢銀行：" + "、".join(banks) + "\n"
+    for warning in report.get("warnings", []):
+        header += f"提醒：{warning}\n"
     for balance in report.get("balances", []):
         if balance.get("error_code") == "verification_required":
             header += f"{balance['bank_name']}：需要人工驗證（可能為 OTP），本次未取得餘額。\n"
@@ -156,7 +149,7 @@ def main():
             header += f"{balance['bank_name']}：圖形驗證碼流程未完成，本次未取得餘額；這不是已確認的 OTP 要求。\n"
         elif balance.get("error_code") == "login_unconfirmed":
             header += f"{balance['bank_name']}：登入／驗證未完成；無法確認是否為 OTP。\n"
-    for part in chunks(redact(header + "\n" + summary_text(output, report.get("balances", [])))):
+    for part in chunks(redact(header + "\n" + render_report(report))):
         request_telegram(token, "sendMessage", json.dumps(
             {"chat_id": chat_id, "text": part}, ensure_ascii=False).encode(), "application/json")
     # Include all structured results, not just the terminal summary.
@@ -191,7 +184,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
+        raise SystemExit(main(sys.argv[1:]))
     except Exception:
         print("報告傳送失敗；請檢查 Secrets 與執行設定。", file=sys.stderr)
         raise SystemExit(1)

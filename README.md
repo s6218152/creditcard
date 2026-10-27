@@ -1,5 +1,24 @@
 # 信用卡帳單與銀行存款餘額查詢
 
+## 結構化報告與帳單分類
+
+Telegram 文字由本次 `output/latest.json` 的 `statements`、`balances` 產生，不再解析終端機輸出。報告保留查詢時間、解析待確認原因及七天內的截止提醒；完整執行紀錄與本次解析檔仍放入私人 ZIP。
+
+帳單僅在 PDF 有唯一、完整且明確標示的帳單／信用卡帳號，並能確認期別時，才依同一銀行與身分分成最新一期、歷史帳單。完整號碼不寫入新增欄位，僅保存雜湊識別。末四碼、遮罩卡號、同銀行名稱或收件時間不足以合併帳單；無法確認時保留並提醒。已過截止日的帳單分開顯示，不能據此推定未繳或已繳清；歷史解析檔仍完整收錄 ZIP。民國年與西元年截止日統一顯示為西元日期。
+
+## 只查餘額與快速除錯
+
+以下模式略過郵件連線、附件下載與 PDF 解析，產生全新的餘額報告，不沿用上次帳單或餘額：
+
+```bash
+.venv/bin/python main.py --balances-only --bank chb
+.venv/bin/python telegram_report.py --balances-only --bank chb
+```
+
+第二個指令會傳送 Telegram，需先設定 Telegram 環境變數。`--bank` 可重複指定；未指定時查所有已啟用銀行。完整帳單報告仍使用原本的 `main.py`／`telegram_report.py`。
+
+GitHub Actions 的 **Monthly Telegram report → Run workflow** 可勾選 `balances_only`，並在 `banks` 填入銀行代碼。每月 5、15、25 日台灣時間中午的自動排程維持完整報告。CI 除 Ubuntu 的 Python 3.11／3.13 外，另以與排程相同的 macOS／Python 3.11 執行離線瀏覽器回歸測試；涵蓋桌面與窄版畫面，不使用真實帳密。
+
 安裝相依套件：
 
 ```bash

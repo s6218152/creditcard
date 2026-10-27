@@ -15,6 +15,7 @@ from mail_fetcher import MailFetcher, is_excluded_email
 from pdf_processor import PDFProcessor
 from parsers.engine import get_parser_for_text, PARSER_ENGINE_VERSION
 from statement_filter import latest_statement_flags
+from statement_report import statement_identity, statement_summary, classify_statements
 from fubon_downloader import FubonStatementDownloader
 from config_validation import validate_config
 from storage_utils import private_directory, private_file, prune_old_files
@@ -142,6 +143,8 @@ def process_single_pdf(pdf_path: Path, processor: PDFProcessor, output_dir: Path
 
         # 4. 附加檔案元數據
         review_reasons = get_review_reasons(parsed_data, text, parser)
+        statement_spec = identify_statement(pdf_path.name, text)
+        statement_bank = statement_spec.name if statement_spec else "未知銀行"
         parsed_data["metadata"] = {
             "filename": pdf_path.name,
             "file_size_bytes": pdf_path.stat().st_size,
@@ -151,6 +154,8 @@ def process_single_pdf(pdf_path: Path, processor: PDFProcessor, output_dir: Path
             "pdf_sha256": pdf_digest,
             "needs_review": bool(review_reasons),
             "review_reasons": review_reasons,
+            "bank_name": statement_bank,
+            **statement_identity(text, statement_bank, pdf_path.name),
         }
         
         # 5. 儲存解析結果至 output 資料夾
@@ -257,7 +262,7 @@ def print_statement_summaries(summaries: list, balances: list) -> set:
     return displayed
 
 
-def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None, *, run_id=None):
+def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None, *, run_id=None, balances_only=False):
     """
     執行完整的下載與解析流程。
     """
@@ -288,12 +293,13 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
         "parser_version": PARSER_ENGINE_VERSION,
         "run_id": run_id or uuid4().hex,
         "pipeline_status": "running",
+        "mode": "balances_only" if balances_only else "full",
     }
 
-    def save_manifest(files):
+    def save_manifest(files, statements=()):
         write_json_atomic(output_dir / "latest.json", {
             **run_metadata, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "files": files, "balances": [],
+            "files": files, "balances": [], "statements": classify_statements(statements),
         })
 
     def finish_run(succeeded):
@@ -307,6 +313,9 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     # Establish this run before any downloads so an interrupted run cannot
     # accidentally reuse the previous run's financial results.
     save_manifest([])
+    if balances_only:
+        print("=== 僅查詢銀行餘額，略過郵件下載與帳單解析 ===")
+        return finish_run(run_balance_query(config, interactive=interactive, output_dir=output_dir))
     retention_days = config["storage"].get("retention_days", 730)
     removed = prune_old_files(download_dir, ("*.pdf",), retention_days)
     removed += prune_old_files(output_dir, ("*_parsed.json",), retention_days)
@@ -357,6 +366,8 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
                 print(f"  [富邦] 信件連結讀取失敗: {error}")
 
     print("\n=== 步驟 2: 開始解密與解析 PDF 帳單 ===")
+    run_metadata["warnings"] = ([] if mail_fetch_succeeded and fubon_fetch_succeeded else
+        ["本次部分下載流程失敗，結果可能包含先前下載的帳單。"])
     bank_passwords = {
         bank: os.getenv(value[2:-1], "") if value.startswith("${") and value.endswith("}") else value
         for bank, value in config.get("mail", {}).get("bank_pdf_passwords", {}).items()
@@ -391,6 +402,7 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
     current_results = []
     parse_failures = 0
     summaries = []
+    statement_rows = []
     
     # 遍歷處理
     for pdf_file in pdf_files:
@@ -402,15 +414,19 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
             bank_passwords.get(bank_name),
         )
         parsed_result = process_single_pdf(pdf_file, processor, output_dir, password=password)
+        bank_name = parsed_result.get("metadata", {}).get("bank_name", bank_name)
         if parsed_result.get("metadata", {}).get("status") == "success":
             current_results.append(f"{pdf_file.stem}_parsed.json")
         else:
             parse_failures += 1
         
         summaries.append((bank_name, parsed_result))
+        statement_rows.append(statement_summary(bank_name, parsed_result, f"{pdf_file.stem}_parsed.json"))
+        # Retain current structured statements if the run is interrupted later.
+        save_manifest(current_results, statement_rows)
 
     print("-" * 50)
-    save_manifest(current_results)
+    save_manifest(current_results, statement_rows)
     balance_succeeded = run_balance_query(config, interactive=interactive, output_dir=output_dir,
                                           show_results=False)
     balances = json.loads((output_dir / "latest.json").read_text(encoding="utf-8"))["balances"]
@@ -436,6 +452,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--bank", type=normalize_bank, choices=sorted(SUPPORTED_BANKS), action="append",
                         help="帳單完成後只查指定銀行的餘額，可重複使用")
+    parser.add_argument("--balances-only", action="store_true", help="只查餘額，略過郵件下載與 PDF 解析")
     args = parser.parse_args()
     raise SystemExit(0 if run_pipeline(args.config, balance_banks=args.bank,
-                                     run_id=os.getenv("CREDITCARD_REPORT_RUN_ID")) else 1)
+                                     run_id=os.getenv("CREDITCARD_REPORT_RUN_ID"), balances_only=args.balances_only) else 1)
