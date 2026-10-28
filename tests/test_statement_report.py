@@ -38,7 +38,7 @@ def test_latest_requires_account_identity_and_keeps_older_documents():
     assert len(rows) == 4
 
 
-def test_structured_report_selects_latest_and_retains_deadline_and_balance_time():
+def test_structured_report_selects_latest_without_status_or_balance_time_labels():
     def statement(period, due, identity='verified-a', amount=75):
         return {'bank_name': '測試銀行', 'status': 'success', 'statement_period': period,
                 'due_date': due, 'identity_hash': identity, 'total_amount': amount}
@@ -53,7 +53,8 @@ def test_structured_report_selects_latest_and_retains_deadline_and_balance_time(
     assert '完整帳單保留附件' in text
     assert '今天截止' not in text  # Negative amounts do not trigger payment reminders.
     assert text.count('NT$ 87.00') == 1
-    assert '餘額查詢時間: 2026-10-28T12:00:00+08:00' in text
+    assert '餘額查詢時間' not in text
+    assert '帳單狀態' not in text
 
 
 def test_invalid_and_unrecognized_amounts_never_become_zero_payments():

@@ -142,8 +142,6 @@ def balance_lines(row):
     label = "臺幣活期存款餘額" if row.get("scope") == "twd_current_deposit_total" else "臺幣存款餘額"
     result = [f"{label}: NT$ {amount:,.2f}" if row.get("currency") == "TWD"
               else f"存款餘額: {amount:,.2f}（幣別依網銀頁面）"]
-    if row.get("queried_at"):
-        result.append(f"餘額查詢時間: {row['queried_at']}")
     return result
 
 
@@ -175,8 +173,6 @@ def render_report(report, *, today=None):
                 continue
             if row.get("statement_period"):
                 lines.append(f"帳單期別: {row['statement_period']}")
-            if row["selection_status"] != "unverified":
-                lines.append("帳單狀態: " + ("最新一期" if row["selection_status"] in ("latest", "latest_by_bank") else "歷史帳單"))
             try:
                 amount = Decimal(str(row.get("total_amount")))
                 amount_found = row.get("total_amount_found", True) and amount.is_finite()
