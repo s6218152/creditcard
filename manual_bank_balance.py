@@ -549,13 +549,22 @@ def _navigate_first_bank(page, visited):
 
 def _navigate_shanghai(page, visited):
     if is_bank_url(page.url, "shanghai"):
+        if page.locator('.loader-overlay:visible').count():
+            return False
         for label in ("臺幣存匯", "臺幣帳戶查詢", "所有帳戶查詢"):
             if label in visited:
                 continue
             entry = page.locator('button.accordion-button:visible').filter(has_text=re.compile(r"^\s*" + re.escape(label) + r"\s*$"))
             if entry.count() == 1:
+                try:
+                    entry.click(timeout=5000)
+                except PlaywrightError as error:
+                    # Loading can start after the readiness check. Let the
+                    # bounded read-only poll reacquire the menu after it ends.
+                    if "intercepts pointer events" in str(error) and page.locator('.loader-overlay:visible').count():
+                        return False
+                    raise
                 visited.add(label)
-                entry.click(timeout=5000)
                 return True
     return False
 

@@ -243,6 +243,50 @@ def test_chb_narrow_tall_entry_uses_visible_area_below_fixed_header(page):
     assert visited == {'chb_twd_menu'}
 
 
+def test_shanghai_waits_for_loader_before_balance_navigation(page):
+    from manual_bank_balance import click_balance_navigation
+    load_mock_page(page, 'https://ebank.scsb.com.tw/', '''
+        <button class="accordion-button" onclick="window.clicked=true">臺幣存匯</button>
+        <div class="loader-overlay" style="position:fixed;inset:0;background:white;z-index:10"></div>
+    ''')
+    visited = set()
+    assert not click_balance_navigation(page, 'shanghai', visited)
+    assert visited == set()
+    page.locator('.loader-overlay').evaluate('e => e.remove()')
+    assert click_balance_navigation(page, 'shanghai', visited)
+    assert visited == {'臺幣存匯'}
+    assert page.evaluate('window.clicked') is True
+
+
+@pytest.mark.parametrize('known_loading', [True, False])
+def test_shanghai_late_loader_never_marks_failed_navigation_as_visited(page, monkeypatch, known_loading):
+    from playwright.sync_api import Locator, Error
+    from manual_bank_balance import click_balance_navigation
+    load_mock_page(page, 'https://ebank.scsb.com.tw/',
+                   '<button class="accordion-button" onclick="window.clicked=true">臺幣存匯</button>')
+    original = Locator.click
+    attempts = []
+    def click(locator, **kwargs):
+        attempts.append(True)
+        if len(attempts) == 1:
+            page.evaluate("name => document.body.insertAdjacentHTML('beforeend','<div class=\"'+name+'\">loading</div>')",
+                          'loader-overlay' if known_loading else 'unknown-blocker')
+            raise Error('overlay intercepts pointer events')
+        return original(locator, **kwargs)
+    monkeypatch.setattr(Locator, 'click', click)
+    visited = set()
+    if known_loading:
+        assert not click_balance_navigation(page, 'shanghai', visited)
+        assert visited == set()
+        page.locator('.loader-overlay').evaluate('e => e.remove()')
+        assert click_balance_navigation(page, 'shanghai', visited)
+        assert visited == {'臺幣存匯'}
+    else:
+        with pytest.raises(Error, match='intercepts pointer events'):
+            click_balance_navigation(page, 'shanghai', visited)
+        assert visited == set()
+
+
 def test_ctbc_unrelated_visible_input_does_not_block_login(page, monkeypatch):
     from ctbc_balance import LOGIN_URL, login_from_environment
     for key in ("CTBC_ID", "CTBC_USER_ID", "CTBC_PASSWORD"):
