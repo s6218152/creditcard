@@ -87,6 +87,48 @@ def statement_summary(bank_name, parsed_result, parsed_file):
     }
 
 
+def latest_statements_by_bank(rows):
+    """User-requested display policy; keep every source document in the ZIP."""
+    groups = {}
+    for index, original in enumerate(rows):
+        row = dict(original)
+        name = row.get("bank_name", "未知銀行")
+        if not row.get("statement_period"):
+            period, _ = _period_and_group(row.get("filename", ""))
+            match = re.search(r"(?<!\d)(20\d{2})(0[1-9]|1[0-2])cycle-statement\.pdf$",
+                              row.get("filename", ""), re.I)
+            if period or match:
+                year, month = period if period else map(int, match.groups())
+                row["statement_period"] = f"{year:04d}-{month:02d}"
+        # Unknown banks cannot safely be treated as the same bank.
+        key = name.removesuffix("銀行") if name != "未知銀行" else (name, index)
+        groups.setdefault(key, []).append(row)
+    selected = []
+    for items in groups.values():
+        def uid(row):
+            match = re.match(r"^(\d+)_", row.get("filename", ""))
+            return int(match.group(1)) if match else 0
+        if all(re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", str(r.get("statement_period", ""))) for r in items):
+            basis = "statement_period"
+        elif all(r.get("due_date_iso") for r in items):
+            basis = "due_date_iso"
+        else:
+            basis = "mail_uid" if all(uid(r) for r in items) else "unconfirmed"
+        def rank(row):
+            primary = (uid(row) if basis == "mail_uid" else
+                       row.get(basis, "") if basis != "unconfirmed" else
+                       row.get("statement_period") or (row.get("due_date_iso") or "")[:7])
+            return primary, uid(row), row.get("filename", "")
+        row = max(items, key=rank)
+        if row.get("bank_name") != "未知銀行":
+            row["selection_status"] = "latest_by_bank"
+        row["selection_basis"] = basis
+        if len(items) > 1 and basis in ("mail_uid", "unconfirmed"):
+            row["selection_warning"] = "部分帳單期別／截止日未辨識，最新一期依郵件編號或已辨識日期選取，請核對附件。"
+        selected.append(row)
+    return selected
+
+
 def balance_lines(row):
     name = row.get("bank_name", "未知銀行")
     if row.get("status") != "success":
@@ -108,7 +150,7 @@ def balance_lines(row):
 def render_report(report, *, today=None):
     """Render JSON only; console messages never determine financial results."""
     today = today or taipei_today()
-    rows = classify_statements(report.get("statements", []), today=today)
+    rows = latest_statements_by_bank(classify_statements(report.get("statements", []), today=today))
     balances = report.get("balances", [])
     by_bank = {r.get("bank_name", "").removesuffix("銀行"): r for r in balances}
     groups = {"最新／待確認帳單": [], "歷史帳單（不代表已繳清）": [], "已過截止日（繳款狀態未確認）": []}
@@ -119,6 +161,8 @@ def render_report(report, *, today=None):
     lines, displayed = [], set()
     if report.get("generated_at"):
         lines.append(f"報告產生時間: {report['generated_at']}")
+    if rows:
+        lines.append("每家銀行僅顯示最新可辨識一期；繳款狀態未確認，完整帳單保留附件。")
     for title, items in groups.items():
         if not items:
             continue
@@ -132,7 +176,7 @@ def render_report(report, *, today=None):
             if row.get("statement_period"):
                 lines.append(f"帳單期別: {row['statement_period']}")
             if row["selection_status"] != "unverified":
-                lines.append("帳單狀態: " + ("最新一期" if row["selection_status"] == "latest" else "歷史帳單"))
+                lines.append("帳單狀態: " + ("最新一期" if row["selection_status"] in ("latest", "latest_by_bank") else "歷史帳單"))
             try:
                 amount = Decimal(str(row.get("total_amount")))
                 amount_found = row.get("total_amount_found", True) and amount.is_finite()
@@ -142,6 +186,8 @@ def render_report(report, *, today=None):
             lines.append(f"繳款截止日: {(row.get('due_date_iso') or row.get('due_date') or '未知').replace('-', '/')}")
             if row["selection_status"] == "unverified":
                 lines.append("提醒：卡片／帳戶身分或期別未確認，保留此帳單；未確認是否已繳款。")
+            if row.get("selection_warning"):
+                lines.append("提醒：" + row["selection_warning"])
             if row["selection_status"] != "history" and row["date_status"] == "due_soon" and amount_found and amount > 0:
                 days = (date.fromisoformat(row["due_date_iso"]) - today).days
                 lines.append(f"提醒：{'今天截止' if days == 0 else f'{days} 天後截止'}，請確認繳款安排。")

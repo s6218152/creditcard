@@ -52,6 +52,18 @@ def test_main_balance_query_reports_failure(monkeypatch, capsys):
     assert "APP-1053" in capsys.readouterr().out
 
 
+def test_terminal_summary_also_shows_only_latest_statement_per_bank(capsys):
+    from main import print_statement_summaries
+    def parsed(period, amount):
+        return {'metadata': {'status': 'success', 'statement_period': period},
+                'total_amount': amount, 'due_date': '無需繳款'}
+    print_statement_summaries([('台北富邦', parsed('2026-09', -19529)),
+                               ('台北富邦', parsed('2026-10', -6174))], [])
+    output = capsys.readouterr().out
+    assert output.count('銀行: 台北富邦') == 1
+    assert '-6,174' in output and '-19,529' not in output
+
+
 def test_is_ctbc_statement_detects_ctbc_filename():
     assert is_ctbc_statement(Path("CTBC_Bank_Estatement.pdf"))
     assert is_ctbc_statement(Path("中國信託信用卡電子帳單.pdf"))

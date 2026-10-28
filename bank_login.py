@@ -183,10 +183,12 @@ def dismiss_login_notice(page, frame, bank, is_official, *, wait_for_notice=Fals
         if notice.count() == 1:
             text = notice.inner_text(timeout=1000)
             maintenance = "維護公告" in text and "系統維護作業" in text
+            dated_maintenance = all(phrase in text for phrase in (
+                "網路銀行", "系統維護作業", "網路銀行將於下列時段", "維護時間及受影響功能"))
             interbank_drill = all(phrase in text for phrase in (
                 "財金公司跨行系統演練", "配合財金公司辦理跨行系統演練",
                 "部分時段將暫停跨行服務", "自行服務不受影響"))
-            if maintenance or interbank_drill:
+            if maintenance or dated_maintenance or interbank_drill:
                 acknowledge = notice.get_by_text(re.compile(r"^(?:我知道了|I got it)$"))
                 if acknowledge.count() == 1 and acknowledge.is_visible():
                     acknowledge.click(timeout=5000)

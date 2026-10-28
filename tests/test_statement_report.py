@@ -38,7 +38,7 @@ def test_latest_requires_account_identity_and_keeps_older_documents():
     assert len(rows) == 4
 
 
-def test_structured_report_separates_history_unknown_and_deadline_reminders():
+def test_structured_report_selects_latest_and_retains_deadline_and_balance_time():
     def statement(period, due, identity='verified-a', amount=75):
         return {'bank_name': '測試銀行', 'status': 'success', 'statement_period': period,
                 'due_date': due, 'identity_hash': identity, 'total_amount': amount}
@@ -48,9 +48,9 @@ def test_structured_report_separates_history_unknown_and_deadline_reminders():
     ], 'balances': [{'bank_name': '測試銀行', 'status': 'success', 'balance': '87', 'currency': 'TWD',
                      'queried_at': '2026-10-28T12:00:00+08:00'}]}, today=date(2026, 10, 28))
     assert '2026/10/30' in text and '2 天後截止' in text
-    assert '歷史帳單（不代表已繳清）' in text
-    assert '已過截止日（繳款狀態未確認）' in text
-    assert '卡片／帳戶身分或期別未確認' in text
+    assert '歷史帳單（不代表已繳清）' not in text
+    assert '銀行: 測試銀行' in text and text.count('銀行: 測試銀行') == 1
+    assert '完整帳單保留附件' in text
     assert '今天截止' not in text  # Negative amounts do not trigger payment reminders.
     assert text.count('NT$ 87.00') == 1
     assert '餘額查詢時間: 2026-10-28T12:00:00+08:00' in text
@@ -61,3 +61,24 @@ def test_invalid_and_unrecognized_amounts_never_become_zero_payments():
         text = render_report({'statements': [{'bank_name': 'A', 'status': 'success', 'total_amount': value}]})
         assert '未辨識（需人工確認）' in text
         assert 'NT$ 0' not in text
+
+
+def test_report_shows_only_latest_month_per_bank_without_account_identity():
+    def row(bank, period, due, amount, filename=''):
+        return {'bank_name': bank, 'status': 'success', 'statement_period': period,
+                'due_date': due, 'total_amount': amount, 'filename': filename}
+    text = render_report({'statements': [
+        row('新光銀行', '2026-09', '115/09/30', 2000),
+        row('新光銀行', '2026-10', '115/10/30', 75),
+        row('台北富邦', '2026-09', '無需繳款', -19529),
+        row('台北富邦', '2026-10', '無需繳款', -6174),
+        row('星展', None, '2026/10/16', 1051), row('星展', None, '2026/11/13', 5341),
+        row('遠東商銀', None, '115/10/13', 5609, '321633_Mon_28_Sep_2026_1534_202609cycle-statement.pdf'),
+        row('遠東商銀', None, '115/11/13', 4672, '322623_Wed_28_Oct_2026_1534_202610cycle-statement.pdf'),
+    ]}, today=date(2026, 10, 28))
+    for name in ['新光銀行', '台北富邦', '星展', '遠東商銀']:
+        assert text.count('銀行: ' + name + '\n') == 1
+    for old_amount in ('2,000', '-19,529', '1,051', '5,609'):
+        assert '本期應繳總金額: NT$ ' + old_amount not in text
+    assert '本期應繳總金額: NT$ 75' in text
+    assert '本期應繳總金額: NT$ -6,174' in text

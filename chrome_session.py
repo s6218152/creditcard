@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from urllib.parse import urlencode
 from ipaddress import IPv4Address
 import json
+import errno
 import subprocess
 import sys
 import tempfile
@@ -81,10 +82,31 @@ def public_host_resolver_rule(host):
     return f"MAP {host} {address}"
 
 
+def cleanup_chrome_profile(directory):
+    """Chrome helpers can finish writes briefly after the main process exits."""
+    for attempt in range(10):
+        try:
+            directory.cleanup()
+            return
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EBUSY) or attempt == 9:
+                raise
+            time.sleep(0.2)
+
+
+@contextmanager
+def temporary_chrome_profile():
+    directory = tempfile.TemporaryDirectory(prefix="ctbc-chrome-")
+    try:
+        yield directory.name
+    finally:
+        cleanup_chrome_profile(directory)
+
+
 @contextmanager
 def system_chrome_context(playwright, *, host_resolver_rules=None):
     executable = chrome_executable()
-    with tempfile.TemporaryDirectory(prefix="ctbc-chrome-") as directory:
+    with temporary_chrome_profile() as directory:
         profile = Path(directory)
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -113,10 +135,14 @@ def system_chrome_context(playwright, *, host_resolver_rules=None):
                     browser.close()
                 except Exception:
                     pass
-            if process.poll() is None:
+            if browser is None and process.poll() is None:
                 process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)

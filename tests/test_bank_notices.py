@@ -111,6 +111,19 @@ def test_shanghai_acknowledges_only_scoped_maintenance_announcement(page, known,
 
 
 @pytest.mark.parametrize('known', [True, False])
+def test_shanghai_dated_maintenance_notice_without_announcement_keyword(page, known):
+    text = ('網路銀行 115/11/05（四）17:00 ~ 18:00 系統維護作業\n'
+            '本行為提供更優質的服務，網路銀行將於下列時段進行系統維護作業，維護時間及受影響功能：\n'
+            '海外股票/ETF交易功能，暫停使用。')
+    if not known:
+        text = text.replace('維護時間及受影響功能', '請輸入密碼及 OTP 啟用服務')
+    load(page, 'https://ebank.scsb.com.tw/', '<div class="modal custom-modal" role="dialog">'
+         '<p>' + text + '</p><button>I got it</button></div>')
+    dismiss_login_notice(page, page.main_frame, 'shanghai', lambda value: bank.is_bank_url(value, 'shanghai'))
+    assert page.evaluate('window.clicked') == (['I got it'] if known else [])
+
+
+@pytest.mark.parametrize('known', [True, False])
 @pytest.mark.parametrize('acknowledge', ['我知道了', 'I got it'])
 def test_shanghai_interbank_drill_notice_uses_only_acknowledgement(page, known, acknowledge):
     text = '財金公司跨行系統演練：配合財金公司辦理跨行系統演練，' \

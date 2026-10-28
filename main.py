@@ -15,7 +15,7 @@ from mail_fetcher import MailFetcher, is_excluded_email
 from pdf_processor import PDFProcessor
 from parsers.engine import get_parser_for_text, PARSER_ENGINE_VERSION
 from statement_filter import latest_statement_flags
-from statement_report import statement_identity, statement_summary, classify_statements
+from statement_report import statement_identity, statement_summary, classify_statements, latest_statements_by_bank
 from fubon_downloader import FubonStatementDownloader
 from config_validation import validate_config
 from storage_utils import private_directory, private_file, prune_old_files
@@ -214,7 +214,12 @@ def run_balance_query(config: dict, interactive: bool = True, output_dir: Path |
 def print_statement_summaries(summaries: list, balances: list) -> set:
     by_bank = {result["bank_name"].removesuffix("銀行"): result for result in balances}
     displayed = set()
-    for bank_name, parsed_result in summaries:
+    rows = [{**statement_summary(name, result, ""), "summary_index": index}
+            for index, (name, result) in enumerate(summaries)]
+    selected = {row["summary_index"] for row in latest_statements_by_bank(classify_statements(rows))}
+    for index, (bank_name, parsed_result) in enumerate(summaries):
+        if index not in selected:
+            continue
         print("-" * 50)
         meta = parsed_result.get("metadata", {})
         if meta.get("status") != "success":
