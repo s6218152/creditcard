@@ -17,7 +17,7 @@ Telegram 文字由本次 `output/latest.json` 的 `statements`、`balances` 產�
 
 第二個指令會傳送 Telegram，需先設定 Telegram 環境變數。`--bank` 可重複指定；未指定時查所有已啟用銀行。完整帳單報告仍使用原本的 `main.py`／`telegram_report.py`。
 
-GitHub Actions 的 **Monthly Telegram report → Run workflow** 可勾選 `balances_only`，並在 `banks` 填入銀行代碼。每月 5、15、25 日台灣時間中午的自動排程維持完整報告。CI 除 Ubuntu 的 Python 3.11／3.13 外，另以與排程相同的 macOS／Python 3.11 執行離線瀏覽器回歸測試；涵蓋桌面與窄版畫面，不使用真實帳密。
+GitHub Actions 的 **Monthly Telegram report → Run workflow** 可勾選 `balances_only`，並在 `banks` 填入銀行代碼。每月 5 日、15 日及當月最後一天台灣時間早上 09:00 的自動排程維持完整報告。月底候選日期先由 Ubuntu 檢查，只有當月最後一天才啟動 macOS 查詢；支援大小月與閏年，手動執行不受日期限制。CI 除 Ubuntu 的 Python 3.11／3.13 外，另以與排程相同的 macOS／Python 3.11 執行離線瀏覽器回歸測試；涵蓋桌面與窄版畫面，不使用真實帳密。
 
 安裝相依套件：
 
