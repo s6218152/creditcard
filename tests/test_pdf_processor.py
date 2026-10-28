@@ -1,6 +1,5 @@
 import pytest
 import pypdf
-from pathlib import Path
 from pdf_processor import PDFProcessor
 
 def test_pdf_processor_decryption(tmp_path, monkeypatch):

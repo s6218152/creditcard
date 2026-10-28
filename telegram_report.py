@@ -77,7 +77,7 @@ def request_telegram(token, method, data, content_type):
             result = json.load(response)
         if not result.get("ok"):
             raise RuntimeError("Telegram 未接受通知")
-    except (HTTPError, URLError) as error:
+    except (HTTPError, URLError):
         # urllib errors can include the token-bearing URL.
         raise RuntimeError("Telegram 傳送失敗；請檢查 Token、Chat ID 與網路") from None
 

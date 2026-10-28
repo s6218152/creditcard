@@ -15,7 +15,7 @@ import threading
 import time
 
 from playwright.sync_api import Error as PlaywrightError
-from bank_specs import CAPTCHA_IMAGES, CaptchaSpec
+from bank_specs import CAPTCHA_IMAGES
 
 
 MIN_CHARACTER_CONFIDENCE = 0.95

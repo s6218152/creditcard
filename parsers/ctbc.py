@@ -1,7 +1,6 @@
 import re
 
 from parsers.base import BaseParser
-from parsers.general import GeneralParser
 
 
 class CtbcParser(BaseParser):
