@@ -64,6 +64,25 @@ def test_terminal_summary_also_shows_only_latest_statement_per_bank(capsys):
     assert '-6,174' in output and '-19,529' not in output
 
 
+def test_cathay_previous_wrong_amount_cache_is_reparsed(tmp_path):
+    import json
+    import hashlib
+    from types import SimpleNamespace
+    pdf = tmp_path / '信用卡電子帳單消費明細_11510.pdf'
+    pdf.write_bytes(b'synthetic-cathay-pdf')
+    output = tmp_path / 'output'
+    output.mkdir()
+    (output / (pdf.stem + '_parsed.json')).write_text(json.dumps({
+        'total_amount': 20, 'total_amount_found': True, 'details': [], 'due_date': '',
+        'metadata': {'status': 'success', 'parser_version': '24',
+                     'pdf_sha256': hashlib.sha256(pdf.read_bytes()).hexdigest()}}))
+    processor = SimpleNamespace(extract_text=lambda *args, **kwargs:
+                                '本期應繳總額 4,321\n繳款截止日：115/11/06')
+    parsed = process_single_pdf(pdf, processor, output)
+    assert parsed['total_amount'] == 4321
+    assert parsed['due_date'] == '115/11/06'
+
+
 def test_is_ctbc_statement_detects_ctbc_filename():
     assert is_ctbc_statement(Path("CTBC_Bank_Estatement.pdf"))
     assert is_ctbc_statement(Path("中國信託信用卡電子帳單.pdf"))

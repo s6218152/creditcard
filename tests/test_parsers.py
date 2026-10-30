@@ -184,6 +184,49 @@ def test_parse_cathay_no_payment_required():
     assert result["total_amount_found"] is True
 
 
+def test_cathay_payment_summary_overrides_revolving_credit_explanation():
+    text = '''115/10/18
+115/11/06
+41,234
+4,000
+正卡本期消費 41,234
+本期應繳總額 41,234
+最低應繳金額，繳清本期帳款所需期間為20期，應繳納總金額為30,000元。
+□ 新臺幣應繳總額
+因便利商店代收金額以2萬元為限，此項目恕無法使用便利商店繳款。
+□ 新臺幣最低應繳
+$4,000元
+115/11/06
+測試用戶
+41,234
+4,000'''
+    result = CathayParser().parse(text)
+    assert result['total_amount'] == 41234
+    assert result['total_amount_found'] is True
+    assert result['due_date'] == '115/11/06'
+
+
+def test_cathay_explanatory_numbers_are_not_bill_amounts():
+    result = CathayParser().parse('最低應繳金額，繳清本期帳款所需期間為20期，應繳納總金額為30,000元。')
+    assert result['total_amount_found'] is False
+
+
+def test_cathay_positive_summary_is_not_zeroed_by_unrelated_no_payment_text():
+    result = CathayParser().parse('本期應繳總額 4,321\n繳款截止日：115/11/06\n若折抵足額則無須繳款。')
+    assert result['total_amount'] == 4321
+    assert result['due_date'] == '115/11/06'
+
+
+def test_cathay_conflicting_summary_amounts_require_review():
+    result = CathayParser().parse('本期應繳總額 4,321\n本期應繳總額 5,432')
+    assert result['total_amount_found'] is False
+
+
+def test_cathay_invalid_payment_date_is_not_accepted():
+    result = CathayParser().parse('本期應繳總額 4,321\n繳款截止日：115/02/30')
+    assert result['due_date'] == ''
+
+
 def test_parse_first_bank_no_payment_required_with_due_date():
     text = """
     115/09/18
