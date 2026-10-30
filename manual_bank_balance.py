@@ -442,7 +442,17 @@ def _click_chb_navigation(page, visited):
             menu = frame.locator('a[data-txnmenuid="TW"]:visible')
             if menu.count() != 1:
                 continue
-            menu.click(timeout=5000)
+            submenu = menu.locator("..").locator(".level-2")
+            if submenu.count() == 1:
+                # CHB paints its menu before app.js binds click handlers.
+                # A visible heading alone is not ready for navigation.
+                frame.wait_for_function("""() => {
+                    const e=document.querySelector('a[data-txnmenuid="TW"]');
+                    return !!e && (!!e.onclick ||
+                        !!window.jQuery?._data(e, 'events')?.click?.length);
+                }""", timeout=30_000)
+            if "active" not in (menu.get_attribute("class") or "").split():
+                menu.click(timeout=5000)
             entry = menu.locator("..").locator('a[data-url="../TxnPage/tw#!/tw01001_1"]')
             if entry.count() != 1:
                 raise ValueError("未找到唯一的彰銀新臺幣活期餘額入口")

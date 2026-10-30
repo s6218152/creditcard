@@ -46,3 +46,17 @@ def test_shanghai_drill_notice_is_acknowledged_without_persistent_preference(pag
         <button onclick="this.parentElement.remove()">I got it</button></div>''')
     assert dismiss_login_notice(page, page.main_frame, 'shanghai', lambda url: is_bank_url(url, 'shanghai'))
     assert not page.locator('#neverShow').is_checked()
+
+
+def test_chb_waits_for_menu_handler_before_opening_submenu(page):
+    load(page, 'https://www.chb.com.tw/netbank/overview', '''
+      <style>nav{position:relative;width:130px}
+      .level-2{position:absolute;left:130px;top:0;width:0;overflow:hidden}
+      a.active + .level-2{width:300px} a{display:block;height:40px}</style>
+      <nav><a data-txnmenuid="TW">新臺幣帳戶</a>
+      <div class="level-2"><a data-url="../TxnPage/tw#!/tw01001_1"
+      onclick="window.clicked=true">新臺幣活期餘額</a></div></nav>
+      <script>setTimeout(()=>{document.querySelector('[data-txnmenuid]').onclick=
+      function(){this.classList.toggle('active')}},800)</script>''')
+    assert click_chb_navigation(page, set())
+    assert page.evaluate('window.clicked') is True

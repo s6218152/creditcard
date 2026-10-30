@@ -348,3 +348,8 @@ def test_fubon_parser_extracts_negative_balance_and_transactions():
         },
     ]
     assert parser.validation_errors(result, text) == []
+
+
+def test_esun_accepts_gregorian_due_date_before_closing_date():
+    text = "1,825 元\n2027/11/15\n1,000 元\n2027/10/28\n本期應繳總金額： TWD 1,825"
+    assert EsunParser().parse(text)["due_date"] == "2027/11/15"

@@ -30,7 +30,7 @@ PARSERS_REGISTRY = {
     "chb": ChbParser(),
 }
 
-PARSER_ENGINE_VERSION = "25"
+PARSER_ENGINE_VERSION = "26"
 
 
 def get_parser_for_text(text: str, filename: str = ""):

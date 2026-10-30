@@ -8,7 +8,7 @@ class EsunParser(BaseParser):
     """Parser for E.SUN Bank credit-card statements."""
 
     _total = re.compile(r"本期應繳總金額[：:]\s*TWD\s*([\d,]+)")
-    _roc_date = re.compile(r"\b1\d{2}/\d{1,2}/\d{1,2}\b")
+    _summary_date = re.compile(r"(?m)^\s*((?:1\d{2}|20\d{2})/\d{1,2}/\d{1,2})\s*$")
 
     def parse(self, text: str) -> dict:
         generic_result = GeneralParser().parse(text)
@@ -23,8 +23,8 @@ class EsunParser(BaseParser):
             result["total_amount"] = int(total_match.group(1).replace(",", ""))
             result["total_amount_found"] = True
 
-        # The first ROC date in the E.SUN payment summary is the due date.
-        due_date = self._roc_date.search(text)
+        # The first standalone ROC or Gregorian date in the E.SUN payment summary is the due date.
+        due_date = self._summary_date.search(text)
         if due_date:
-            result["due_date"] = due_date.group(0)
+            result["due_date"] = due_date.group(1)
         return result
