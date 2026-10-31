@@ -43,6 +43,17 @@ def test_failed_initial_navigation_never_attempts_login(monkeypatch):
     assert calls == ['goto']
 
 
+def test_feib_dns_failure_keeps_only_safe_resolution_diagnostics(monkeypatch):
+    import manual_bank_balance as bank
+    failure = ValueError('unavailable')
+    failure.resolution_attempts = [{'resolver': 'system', 'result': 'OSError'}]
+    monkeypatch.setattr(bank, 'public_host_resolver_rule', lambda host: (_ for _ in ()).throw(failure))
+    with pytest.raises(BankQueryError) as caught:
+        bank.query_balance('feib')
+    assert caught.value.code == 'login_dns_failed'
+    assert caught.value.diagnostics == [{'dns_resolution': failure.resolution_attempts}]
+
+
 def frame(url, content, count=1):
     return SimpleNamespace(url=url, locator=lambda selector: SimpleNamespace(
         count=lambda: count, inner_text=lambda **kwargs: content))

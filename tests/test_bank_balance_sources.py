@@ -323,3 +323,20 @@ def test_ctbc_validation_diagnostics_never_include_credentials(page):
     assert frame["login_buttons"][0]["disabled"] is True
     assert frame["login_buttons"][0]["visible"] is True
     assert "private-" not in json.dumps(diagnostic)
+
+
+@pytest.mark.parametrize('selected_all', [True, False])
+def test_chb_uses_tomselect_only_when_all_accounts_selected(page, selected_all):
+    from manual_bank_balance import click_chb_navigation
+    selection = '全部帳號' if selected_all else '單一帳號'
+    load_mock_page(page, 'https://www.chb.com.tw/chbnib/faces/common/TxnPage/tw#!/tw01001_1', f'''
+      <div id="content"><div class="card-bottom-panel">
+        <select style="display:none" class="tomselected ts-hidden-accessible">
+          <option selected>{selection}</option></select>
+        <div class="ts-wrapper"><div class="ts-control" role="combobox">{selection}</div></div>
+      </div><button onclick="window.querySubmitted=true">確定</button></div>
+    ''')
+    visited = {'chb_twd_menu'}
+    assert click_chb_navigation(page, visited) is selected_all
+    assert bool(page.evaluate('window.querySubmitted')) is selected_all
+    assert ('chb_twd_query' in visited) is selected_all

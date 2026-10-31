@@ -15,7 +15,8 @@ from mail_fetcher import MailFetcher, is_excluded_email
 from pdf_processor import PDFProcessor
 from parsers.engine import get_parser_for_text, PARSER_ENGINE_VERSION
 from statement_filter import latest_statement_flags
-from statement_report import statement_identity, statement_summary, classify_statements, latest_statements_by_bank
+from statement_report import (balance_difference_line, classify_statements, latest_statements_by_bank,
+                              statement_identity, statement_summary)
 from fubon_downloader import FubonStatementDownloader
 from config_validation import validate_config
 from storage_utils import private_directory, private_file, prune_old_files
@@ -261,6 +262,8 @@ def print_statement_summaries(summaries: list, balances: list) -> set:
                 print("存款餘額: 請先在銀行完成基本資料與 EDD 問卷更新")
             else:
                 print(f"存款餘額: 查詢失敗（{balance.get('error_message', '未取得餘額')}）")
+        print(balance_difference_line(balance, parsed_result.get("total_amount"),
+                                      parsed_result.get("total_amount_found", True)))
         if meta.get("needs_review"):
             reasons = "；".join(meta.get("review_reasons", []))
             print(f"提醒：解析結果需要人工確認：{reasons}")
@@ -445,6 +448,7 @@ def run_pipeline(config_path="config.yaml", interactive=True, balance_banks=None
                 print(f"{result['bank_name']}{label}: NT$ {amount:,.2f}")
             else:
                 print(f"{result['bank_name']}存款餘額: {amount:,.2f}（幣別依網銀頁面）")
+            print(balance_difference_line(None, None, False))
     print("所有帳單處理完成！")
     if not mail_fetch_succeeded or not fubon_fetch_succeeded:
         print("注意：本次部分下載流程失敗，上述結果可能包含先前下載的帳單。")

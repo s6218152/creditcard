@@ -65,7 +65,11 @@ def collect_page_diagnostics(page, bank, is_official):
 
     result = {"bank": bank, "frames": [], "verification_input_visible": False}
     if not is_official(page.url):
-        return {**result, "official_page": False}
+        parsed = urlparse(page.url)
+        state = ("blank" if page.url in ("", "about:blank", "about:newtab") else
+                 "browser_error" if parsed.scheme == "chrome-error" else "unverified_origin")
+        return {**result, "official_page": False, "page_state": state,
+                "scheme": parsed.scheme, "host": parsed.hostname}
     result["verification_input_visible"] = has_verification_challenge(page, is_official)
     for frame in page.frames:
         if not is_official(frame.url):

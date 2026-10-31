@@ -111,7 +111,11 @@ def prediction(text, confidence=0.999):
 
 
 def test_hncb_uses_independent_ocr_consensus_for_noisy_four_digit_images():
-    assert bank_captcha.CAPTCHA_IMAGES["hncb"].consensus_fallback
+    spec = bank_captcha.CAPTCHA_IMAGES["hncb"]
+    assert spec.consensus_fallback
+    # HNCB's displayed thumbnail loses enough glyph detail to harm the
+    # deliberately strict consensus check. Read its already-loaded source.
+    assert spec.natural_image
 
 
 def test_decoder_preserves_leading_zeroes_and_separate_repeated_digits():

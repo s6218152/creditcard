@@ -101,7 +101,8 @@ BANK_SPECS = {
     "hncb": BankSpec("華南銀行", "https://netbank.hncb.com.tw/", ("hncb.com.tw",),
         "manual_bank_balance", ("華南",),
         LoginForm(("#USERIDTEXT", "#NICKNAME", "#password"), 'a:text-is("確定登入")', "#TrxCaptchaKey"),
-        CaptchaSpec("#code_Cap", 4, 'a[onclick="chgCaptcha();"]', consensus_fallback=True)),
+        CaptchaSpec("#code_Cap", 4, 'a[onclick="chgCaptcha();"]', consensus_fallback=True,
+                    natural_image=True)),
 }
 
 LOGIN_FORMS = {key: spec.login_form for key, spec in BANK_SPECS.items() if spec.login_form}

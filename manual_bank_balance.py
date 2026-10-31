@@ -524,10 +524,21 @@ def _click_chb_navigation(page, visited):
         parsed = urlparse(frame.url)
         if "chb_twd_query" not in visited and parsed.path.endswith("/TxnPage/tw") and parsed.fragment == "!/tw01001_1":
             content = frame.locator("#content")
-            accounts = content.locator("select:visible")
+            accounts = content.locator("select")
             confirm = content.get_by_text("確定", exact=True)
             if accounts.count() == 1 and confirm.count() == 1 and confirm.is_visible():
-                accounts.select_option(label="全部帳號", timeout=5000)
+                if accounts.is_visible():
+                    accounts.select_option(label="全部帳號", timeout=5000)
+                else:
+                    # Tom Select hides the native select while presenting a
+                    # visible combobox. Only submit if both controls agree
+                    # that all accounts are already selected.
+                    panel = accounts.locator("..").locator(".ts-wrapper .ts-control[role=combobox]:visible")
+                    selected = accounts.locator("option:checked")
+                    if (panel.count() != 1 or selected.count() != 1 or
+                            selected.inner_text(timeout=1000).strip() != "全部帳號" or
+                            panel.inner_text(timeout=1000).strip() != "全部帳號"):
+                        continue
                 confirm.click(timeout=5000)
                 visited.add("chb_twd_query")
                 return True
@@ -805,10 +816,15 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
         try:
             rules = public_host_resolver_rule(urlparse(url).hostname)
         except ValueError as error:
-            raise BankQueryError("無法解析遠東商銀官方登入網址；本次未送出帳密，請稍後再試", "login_dns_failed") from error
+            failure = BankQueryError("無法解析遠東商銀官方登入網址；本次未送出帳密，請稍後再試", "login_dns_failed")
+            attempts = getattr(error, "resolution_attempts", ())
+            if attempts:
+                failure.diagnostics = [{"dns_resolution": attempts}]
+            raise failure from error
         context_factory = partial(system_chrome_context, host_resolver_rules=rules)
     with sync_playwright() as playwright:
         with diagnostic_chrome_context(playwright, bank, is_official, context_factory) as context:
+            startup_pages = {id(candidate) for candidate in getattr(context, "pages", ())}
             page = context.new_page()
             alerts = []
             def on_dialog(dialog):
@@ -842,10 +858,29 @@ def _query_balance(bank, balance_selector=None, *, verification_timeout=120):
             recovered_session = False
             hncb_nickname_stage = False
             last_error = None
+            navigation_started = None
             while time.monotonic() < deadline:
-                pages = [candidate for candidate in context.pages if is_official(candidate.url) and not candidate.is_closed()]
-                if not pages:
+                open_pages = [candidate for candidate in context.pages
+                              if id(candidate) not in startup_pages and not candidate.is_closed()]
+                if not open_pages:
                     raise BankQueryError("網銀視窗已關閉，查詢已取消", "browser_closed")
+                pages = [candidate for candidate in open_pages if is_official(candidate.url)]
+                if not pages:
+                    if any(candidate.url.startswith("chrome-error://") for candidate in open_pages):
+                        raise BankQueryError("登入後瀏覽器顯示連線錯誤頁；未取得餘額，不會重送帳密",
+                                             "bank_navigation_failed")
+                    # An open tab can briefly be blank or on a redirect URL.
+                    # Observe it until it returns to an official origin; never
+                    # inspect forms or submit anything on the intermediate page.
+                    now = time.monotonic()
+                    if navigation_started is None:
+                        navigation_started = now
+                    if now - navigation_started >= 15 or now + 0.25 >= deadline:
+                        raise BankQueryError("登入後未回到可驗證的銀行官方頁面；轉址或載入未完成，未取得餘額，不會重送帳密",
+                                             "bank_navigation_unconfirmed")
+                    open_pages[-1].wait_for_timeout(250)
+                    continue
+                navigation_started = None
                 page = pages[-1]
                 if confirm_existing_login(page, bank, confirmed):
                     page.wait_for_timeout(250)

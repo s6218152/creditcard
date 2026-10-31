@@ -92,3 +92,16 @@ def test_navigation_network_diagnostics_preserve_only_fixed_error_codes():
                 raise ValueError('sanitized navigation error') from error
     assert caught.value.diagnostics == [{'network_errors': ['ERR_CONNECTION_RESET']}]
     assert 'private-secret' not in json.dumps(caught.value.diagnostics)
+
+
+@pytest.mark.parametrize(("url", "state"), [
+    ("about:blank", "blank"),
+    ("chrome-error://chromewebdata/", "browser_error"),
+    ("https://redirect.example/private-path?token=private-secret", "unverified_origin"),
+])
+def test_nonofficial_page_diagnostics_distinguish_redirects_without_private_url(url, state):
+    page = SimpleNamespace(url=url)
+    result = collect_page_diagnostics(page, "cathay", lambda value: False)
+    assert result["page_state"] == state
+    assert result["official_page"] is False
+    assert "private" not in json.dumps(result)

@@ -145,6 +145,29 @@ def balance_lines(row):
     return result
 
 
+def balance_difference_line(balance, total_amount, total_amount_found=True):
+    """Return the displayed TWD deposit balance minus the current statement total."""
+    if not total_amount_found:
+        return "差額：無法計算（本期應繳總金額未辨識）"
+    try:
+        amount = Decimal(str(total_amount))
+        if not amount.is_finite():
+            raise ValueError("non-finite total")
+    except (InvalidOperation, ValueError):
+        return "差額：無法計算（本期應繳總金額未辨識）"
+    if not balance or balance.get("status") != "success":
+        return "差額：無法計算（未取得臺幣存款餘額）"
+    if balance.get("currency") != "TWD":
+        return "差額：無法計算（存款餘額非臺幣）"
+    try:
+        deposit = Decimal(str(balance.get("balance")))
+        if not deposit.is_finite():
+            raise ValueError("non-finite balance")
+    except (InvalidOperation, ValueError):
+        return "差額：無法計算（臺幣存款餘額資料無法確認）"
+    return f"差額：NT$ {deposit - amount:,.2f}"
+
+
 def render_report(report, *, today=None):
     """Render JSON only; console messages never determine financial results."""
     today = today or taipei_today()
@@ -193,7 +216,9 @@ def render_report(report, *, today=None):
             if balance and name.removesuffix("銀行") not in displayed:
                 lines.extend(balance_lines(balance))
                 displayed.add(name.removesuffix("銀行"))
+            lines.append(balance_difference_line(balance, amount, amount_found))
     for row in balances:
         if row.get("bank_name", "").removesuffix("銀行") not in displayed:
-            lines.extend([f"銀行: {row.get('bank_name', '未知銀行')}", *balance_lines(row)])
+            lines.extend([f"銀行: {row.get('bank_name', '未知銀行')}", *balance_lines(row),
+                          balance_difference_line(None, None, False)])
     return "\n".join(lines) or "本次未產出可顯示的結果；請查看附件中的完整紀錄。"

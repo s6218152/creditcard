@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import shutil
 import socket
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 from ipaddress import IPv4Address
 import json
@@ -61,24 +61,46 @@ def public_host_resolver_rule(host):
             if address.is_global:
                 return str(address)
         return None
+    attempts = []
     try:
         address = public_address(item[4][0] for item in socket.getaddrinfo(host, 443, family=socket.AF_INET))
-    except OSError:
+        attempts.append({"resolver": "system", "result": "resolved" if address else "no_public_ipv4"})
+    except OSError as error:
         address = None
+        attempts.append({"resolver": "system", "result": type(error).__name__})
     if not address:
         # Only the public hostname is sent, never bank credentials or page URLs.
+        # An independent HTTPS resolver can recover a transient outage of the first.
         query = urlencode({"name": host, "type": "A"})
-        try:
-            with urlopen("https://dns.google/resolve?" + query, timeout=10) as response:
-                answer = json.load(response)
-            if isinstance(answer, dict) and answer.get("Status") == 0:
-                address = public_address(item.get("data", "") for item in answer.get("Answer", [])
-                    if isinstance(item, dict) and item.get("type") == 1
-                    and item.get("name", "").rstrip(".").lower() == host.lower())
-        except (OSError, ValueError):
-            pass
+        requests = (
+            ("google", "https://dns.google/resolve?" + query),
+            ("cloudflare", Request("https://cloudflare-dns.com/dns-query?" + query,
+                                   headers={"Accept": "application/dns-json"})),
+        )
+        for resolver, request in requests:
+            try:
+                with urlopen(request, timeout=10) as response:
+                    answer = json.load(response)
+                status = answer.get("Status") if isinstance(answer, dict) else None
+                records = answer.get("Answer") if isinstance(answer, dict) else None
+                if status == 0 and isinstance(records, list):
+                    address = public_address(item.get("data", "") for item in records
+                        if isinstance(item, dict) and item.get("type") == 1
+                        and isinstance(item.get("name"), str)
+                        and item["name"].rstrip(".").lower() == host.lower())
+                attempts.append({"resolver": resolver,
+                                 "result": "resolved" if address else "no_valid_answer",
+                                 "dns_status": status if isinstance(status, int) else None})
+                if address:
+                    break
+            except (OSError, ValueError) as error:
+                # Keep only the exception type: network error strings can include
+                # proxy credentials or machine-specific details.
+                attempts.append({"resolver": resolver, "result": type(error).__name__})
     if not address:
-        raise ValueError("無法解析銀行官方登入網址")
+        error = ValueError("無法解析銀行官方登入網址")
+        error.resolution_attempts = attempts
+        raise error
     return f"MAP {host} {address}"
 
 

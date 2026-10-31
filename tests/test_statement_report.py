@@ -2,7 +2,8 @@ from datetime import date
 
 import pytest
 
-from statement_report import classify_statements, normalized_due_date, render_report, statement_identity
+from statement_report import (balance_difference_line, classify_statements, normalized_due_date,
+                              render_report, statement_identity)
 
 
 @pytest.mark.parametrize('raw,expected', [
@@ -53,8 +54,17 @@ def test_structured_report_selects_latest_without_status_or_balance_time_labels(
     assert '完整帳單保留附件' in text
     assert '今天截止' not in text  # Negative amounts do not trigger payment reminders.
     assert text.count('NT$ 87.00') == 1
+    assert '差額：NT$ 12.00' in text
     assert '餘額查詢時間' not in text
     assert '帳單狀態' not in text
+
+
+def test_difference_requires_verified_twd_balance_and_recognized_total():
+    balance = {'status': 'success', 'currency': 'TWD', 'balance': '1200'}
+    assert balance_difference_line(balance, 1000) == '差額：NT$ 200.00'
+    assert balance_difference_line(balance, -20) == '差額：NT$ 1,220.00'
+    assert '無法計算' in balance_difference_line(None, 1000)
+    assert '無法計算' in balance_difference_line(balance, None, False)
 
 
 def test_invalid_and_unrecognized_amounts_never_become_zero_payments():

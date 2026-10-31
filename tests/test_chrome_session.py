@@ -50,7 +50,7 @@ def test_public_host_rule_falls_back_to_https_dns_with_validated_answer(monkeypa
     monkeypatch.setattr(chrome_session.socket, 'getaddrinfo', dns_error)
     urls = []
     def resolve(url, **kwargs):
-        urls.append(url)
+        urls.append(url.full_url if hasattr(url, 'full_url') else url)
         return io.BytesIO(json.dumps(answer).encode())
     monkeypatch.setattr(chrome_session, 'urlopen', resolve)
     if expected:
@@ -58,7 +58,8 @@ def test_public_host_rule_falls_back_to_https_dns_with_validated_answer(monkeypa
     else:
         with pytest.raises(ValueError, match='無法解析'):
             chrome_session.public_host_resolver_rule('ebank.feib.com.tw')
-    assert urls == ['https://dns.google/resolve?name=ebank.feib.com.tw&type=A']
+    assert urls == ['https://dns.google/resolve?name=ebank.feib.com.tw&type=A'] + ([] if expected else [
+        'https://cloudflare-dns.com/dns-query?name=ebank.feib.com.tw&type=A'])
 
 
 def test_wait_for_debug_port_fails_when_chrome_exits():
@@ -138,3 +139,34 @@ def test_context_cleans_profile_without_overwriting_result_or_original_error(mon
     assert not any("no-sandbox" in arg or "disable" in arg for arg in commands[0])
     assert calls == (["Browser.close", "disconnect", "wait", "terminate", "wait", "kill", "wait"] if unresponsive
                      else ["Browser.close", "disconnect", "wait"])
+
+
+def test_public_host_rule_recovers_when_first_https_dns_is_unavailable(monkeypatch):
+    monkeypatch.setattr(chrome_session.socket, 'getaddrinfo',
+                        lambda *args, **kwargs: (_ for _ in ()).throw(OSError('DNS unavailable')))
+    requests = []
+    def resolve(request, **kwargs):
+        url = request.full_url if hasattr(request, 'full_url') else request
+        requests.append(url)
+        if 'dns.google' in url:
+            raise OSError('temporary resolver outage')
+        assert request.get_header('Accept') == 'application/dns-json'
+        return io.BytesIO(json.dumps({'Status': 0, 'Answer': [
+            {'name': 'ebank.feib.com.tw.', 'type': 1, 'data': '93.184.216.34'}
+        ]}).encode())
+    monkeypatch.setattr(chrome_session, 'urlopen', resolve)
+    assert chrome_session.public_host_resolver_rule('ebank.feib.com.tw') == 'MAP ebank.feib.com.tw 93.184.216.34'
+    assert len(requests) == 2
+
+
+def test_failed_dns_keeps_safe_diagnostics_without_raw_network_messages(monkeypatch):
+    def failure(*args, **kwargs):
+        raise OSError('proxy-password-must-not-be-logged')
+    monkeypatch.setattr(chrome_session.socket, 'getaddrinfo', failure)
+    monkeypatch.setattr(chrome_session, 'urlopen', failure)
+    with pytest.raises(ValueError) as caught:
+        chrome_session.public_host_resolver_rule('ebank.feib.com.tw')
+    assert caught.value.resolution_attempts == [
+        {'resolver': resolver, 'result': 'OSError'}
+        for resolver in ('system', 'google', 'cloudflare')]
+    assert 'proxy-password' not in str(caught.value)
